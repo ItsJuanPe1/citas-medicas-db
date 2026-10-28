@@ -1,6 +1,5 @@
 -- =====================================================================
 -- PKG_GESTION_CITAS  (HU01 reservar, HU02 cancelar; luego HU09)
--- Reemplaza a PKG_CITAS. Antes de correrlo:  DROP PACKAGE PKG_CITAS;
 -- =====================================================================
 CREATE OR REPLACE PACKAGE PKG_GESTION_CITAS AS
 
