@@ -1,7 +1,7 @@
 -- =====================================================================
 -- PKG_HISTORIAS_CLINICAS  (HU03 registrar consulta; luego HU04, HU07, HU08)
 -- Inserta en HISTORIA_CLINICA y actualiza el estado de CITAS_MEDICAS. No modifica la estructura de ninguna tabla.
--- Errores: rango 20101-20199. (20106: cita vencida)
+-- Errores: rango 20101-20199. (20106: cita vencida; 20109: cita que aun no inicia)
 -- =====================================================================
 CREATE OR REPLACE PACKAGE PKG_HISTORIAS_CLINICAS AS
 
@@ -57,6 +57,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
         v_estado      NUMBER;
         v_medico      NUMBER;
         v_fin         TIMESTAMP;
+        v_inicio      TIMESTAMP;
         e_bloqueado   EXCEPTION;
         PRAGMA EXCEPTION_INIT(e_bloqueado, -30006);
     BEGIN
@@ -72,8 +73,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
 
         -- Bloquea la cita: dos registros simultaneos de la misma consulta no pueden pasar
         BEGIN
-            SELECT c.ID_ESTADO, a.ID_MEDICO, c.FECHA_HORA_FIN
-              INTO v_estado, v_medico, v_fin
+            SELECT c.ID_ESTADO, a.ID_MEDICO, c.FECHA_HORA_FIN, c.FECHA_HORA_INICIO
+              INTO v_estado, v_medico, v_fin, v_inicio
               FROM CITAS_MEDICAS c
               JOIN AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
              WHERE c.ID_CITA = p_id_cita
@@ -91,6 +92,11 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
 
         IF v_estado <> v_prog THEN
             RAISE_APPLICATION_ERROR(-20102, 'Solo se puede registrar la consulta de una cita PROGRAMADA');
+        END IF;
+
+        -- Solo se puede registrar desde la hora de inicio de la cita
+        IF v_inicio > LOCALTIMESTAMP THEN
+            RAISE_APPLICATION_ERROR(-20109, 'Aun no es la hora de esta cita; la consulta se puede registrar desde que inicia');
         END IF;
 
         -- Solo se atiende hasta la hora final de la cita
