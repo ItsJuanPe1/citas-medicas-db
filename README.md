@@ -18,6 +18,12 @@ Al terminar los pasos 2 a 4 deberías tener: 100 pacientes, 10 médicos, 3 farma
 (20% canceladas), 148 recetas y 117 usuarios. Las consultas de verificación están al final de
 `utilidades/generador_datos.sql`.
 
+## Modelo cita-agenda (1 a N)
+Una agenda (`AGENDAS_MEDICOS`) es un rango de horas del medico (ej. martes de 7:00 a 12:00) y puede tener varias
+citas; cada cita guarda su propia `FECHA_HORA_INICIO` y `FECHA_HORA_FIN`. Si ya tenias la BD cargada con el modelo
+anterior (1 a 1), corre `02_tablas/migracion_cita_agenda_1_a_n.sql` una vez, sin borrar datos. Despues ejecuta
+`03_datos/estado_no_asistio.sql` (agrega el estado NO_ASISTIO) y vuelve a compilar los paquetes de `06_procedimientos`.
+
 ## Datos de prueba
 - Todos los usuarios tienen la clave `Clave123` (guardada como hash SHA-256).
 - Usuarios sin entidad: `superadmin1`, `gerente1`, `recepcionista1`, `recepcionista2`.
