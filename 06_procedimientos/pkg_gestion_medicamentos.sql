@@ -31,13 +31,15 @@ CREATE OR REPLACE PACKAGE PKG_GESTION_MEDICAMENTOS AS
         p_id_medico   IN  NUMBER DEFAULT NULL
     );
 
-    -- Entrega lo que alcance del pendiente (todo, o lo que haya en stock) y lo descuenta.
+    -- Entrega y descuenta del stock. p_cantidad = cuantas unidades entregar (entrega parcial);
+    -- NULL = todo lo pendiente, o lo que alcance en stock.
     PROCEDURE ENTREGAR_MEDICAMENTO(
         p_id_detalle      IN  NUMBER,
         p_id_usuario      IN  NUMBER,
         p_id_farmaceutico IN  NUMBER,        -- NULL si lo hace el superadmin
         p_entregadas      OUT NUMBER,
-        p_pendientes      OUT NUMBER
+        p_pendientes      OUT NUMBER,
+        p_cantidad        IN  NUMBER DEFAULT NULL
     );
 
 END PKG_GESTION_MEDICAMENTOS;
@@ -162,7 +164,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
         p_id_usuario      IN  NUMBER,
         p_id_farmaceutico IN  NUMBER,
         p_entregadas      OUT NUMBER,
-        p_pendientes      OUT NUMBER
+        p_pendientes      OUT NUMBER,
+        p_cantidad        IN  NUMBER DEFAULT NULL
     ) IS
         v_entregado NUMBER := id_param('ESTADO_DETALLE_RECETA', 'ENTREGADO');
         v_med       NUMBER;
@@ -206,7 +209,17 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
             RAISE_APPLICATION_ERROR(-20207, 'No hay stock disponible de este medicamento');
         END IF;
 
-        p_entregadas := LEAST(v_pend, v_disp);
+        IF p_cantidad IS NULL THEN
+            p_entregadas := LEAST(v_pend, v_disp);
+        ELSE
+            IF p_cantidad < 1 OR p_cantidad <> TRUNC(p_cantidad) OR p_cantidad > v_pend THEN
+                RAISE_APPLICATION_ERROR(-20210, 'La cantidad a entregar debe ser un entero entre 1 y ' || v_pend);
+            END IF;
+            IF p_cantidad > v_disp THEN
+                RAISE_APPLICATION_ERROR(-20207, 'Stock insuficiente: solo hay ' || v_disp || ' disponibles');
+            END IF;
+            p_entregadas := p_cantidad;
+        END IF;
         p_pendientes := v_pend - p_entregadas;
 
         UPDATE STOCK_FARMACIA
