@@ -72,7 +72,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
 
         -- Bloquea la cita: dos registros simultaneos de la misma consulta no pueden pasar
         BEGIN
-            SELECT c.ID_ESTADO, a.ID_MEDICO, a.FECHA_HORA_FIN
+            SELECT c.ID_ESTADO, a.ID_MEDICO, c.FECHA_HORA_FIN
               INTO v_estado, v_medico, v_fin
               FROM CITAS_MEDICAS c
               JOIN AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
@@ -132,7 +132,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
                     FROM CITAS_MEDICAS c
                     JOIN AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
                    WHERE c.ID_ESTADO = v_prog
-                     AND a.FECHA_HORA_FIN < LOCALTIMESTAMP
+                     AND c.FECHA_HORA_FIN < LOCALTIMESTAMP
                      FOR UPDATE OF c.ID_ESTADO SKIP LOCKED) LOOP
             UPDATE CITAS_MEDICAS SET ID_ESTADO = v_noas WHERE ID_CITA = r.ID_CITA;
             -- ID_USUARIO 0 = sistema
