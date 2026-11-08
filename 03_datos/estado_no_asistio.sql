@@ -1,5 +1,5 @@
 -- Unica fila nueva de datos: estado NO_ASISTIO para citas que pasaron su hora sin atenderse.
--- No cambia tablas ni toca filas existentes. Ejecutar UNA vez por base.
+-- No cambia tablas ni toca filas existentes. Ejecutar UNA vez por base (cada companero en la suya).
 DECLARE
     v_existe NUMBER;
 BEGIN
