@@ -4,10 +4,6 @@
 -- PKG_HISTORIAS_CLINICAS.REGISTRAR_CONSULTA), la regla se cumple. Errores: 20107, 20108, 20109 (cita que aun no inicia).
 -- No modifica la estructura de ninguna tabla.
 -- =====================================================================
--- =====================================================================
--- TRG_HISTORIA_CITA_PROGRAMADA
--- HU04: no se puede crear una historia clinica de una cita que no este PROGRAMADA.
--- =====================================================================
 CREATE OR REPLACE TRIGGER TRG_HISTORIA_CITA_PROGRAMADA
 BEFORE INSERT ON TBL_HISTORIA_CLINICA
 FOR EACH ROW
@@ -36,4 +32,4 @@ BEGIN
     END IF;
 END TRG_HISTORIA_CITA_PROGRAMADA;
 /
-SHOW ERRORS;
+SHOW ERRORS
