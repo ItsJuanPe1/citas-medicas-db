@@ -1,5 +1,5 @@
 -- =====================================================================
--- PKG_PERFILES: cada usuario edita su telefono y correo (UPDATE en MEDICOS, PACIENTES o FARMACEUTICOS).
+-- PKG_PERFILES: cada usuario edita su telefono y correo (UPDATE en TBL_MEDICOS, TBL_PACIENTES o TBL_FARMACEUTICOS).
 -- No modifica la estructura de ninguna tabla.
 -- Nombre, documento, etc. NO se editan aqui. Errores: 20401-20499.
 -- =====================================================================
@@ -44,17 +44,17 @@ CREATE OR REPLACE PACKAGE BODY PKG_PERFILES AS
         -- Valores anteriores (y bloqueo de la fila)
         BEGIN
             IF p_rol = 'MEDICO' THEN
-                v_tabla := 'MEDICOS';
-                SELECT TELEFONO, EMAIL INTO v_tel_ant, v_mail_ant FROM MEDICOS WHERE ID_MEDICO = p_id_entidad FOR UPDATE;
-                UPDATE MEDICOS SET TELEFONO = v_tel, EMAIL = v_mail WHERE ID_MEDICO = p_id_entidad;
+                v_tabla := 'TBL_MEDICOS';
+                SELECT TELEFONO, EMAIL INTO v_tel_ant, v_mail_ant FROM TBL_MEDICOS WHERE ID_MEDICO = p_id_entidad FOR UPDATE;
+                UPDATE TBL_MEDICOS SET TELEFONO = v_tel, EMAIL = v_mail WHERE ID_MEDICO = p_id_entidad;
             ELSIF p_rol = 'PACIENTE' THEN
-                v_tabla := 'PACIENTES';
-                SELECT TELEFONO, EMAIL INTO v_tel_ant, v_mail_ant FROM PACIENTES WHERE ID_PACIENTE = p_id_entidad FOR UPDATE;
-                UPDATE PACIENTES SET TELEFONO = v_tel, EMAIL = v_mail WHERE ID_PACIENTE = p_id_entidad;
+                v_tabla := 'TBL_PACIENTES';
+                SELECT TELEFONO, EMAIL INTO v_tel_ant, v_mail_ant FROM TBL_PACIENTES WHERE ID_PACIENTE = p_id_entidad FOR UPDATE;
+                UPDATE TBL_PACIENTES SET TELEFONO = v_tel, EMAIL = v_mail WHERE ID_PACIENTE = p_id_entidad;
             ELSE
-                v_tabla := 'FARMACEUTICOS';
-                SELECT TELEFONO, EMAIL INTO v_tel_ant, v_mail_ant FROM FARMACEUTICOS WHERE ID_FARMACEUTICO = p_id_entidad FOR UPDATE;
-                UPDATE FARMACEUTICOS SET TELEFONO = v_tel, EMAIL = v_mail WHERE ID_FARMACEUTICO = p_id_entidad;
+                v_tabla := 'TBL_FARMACEUTICOS';
+                SELECT TELEFONO, EMAIL INTO v_tel_ant, v_mail_ant FROM TBL_FARMACEUTICOS WHERE ID_FARMACEUTICO = p_id_entidad FOR UPDATE;
+                UPDATE TBL_FARMACEUTICOS SET TELEFONO = v_tel, EMAIL = v_mail WHERE ID_FARMACEUTICO = p_id_entidad;
             END IF;
         EXCEPTION
             WHEN NO_DATA_FOUND THEN
@@ -63,8 +63,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_PERFILES AS
                 RAISE_APPLICATION_ERROR(-20405, 'Ese correo ya esta en uso por otra persona');
         END;
 
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'ACTUALIZAR_CONTACTO', v_tabla, p_id_entidad,
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'ACTUALIZAR_CONTACTO', v_tabla, p_id_entidad,
                 'telefono=' || v_tel_ant || '; email=' || v_mail_ant,
                 'telefono=' || v_tel || '; email=' || v_mail);
 
@@ -77,4 +77,4 @@ CREATE OR REPLACE PACKAGE BODY PKG_PERFILES AS
 
 END PKG_PERFILES;
 /
-SHOW ERRORS
+SHOW ERRORS;
