@@ -49,7 +49,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
         v_id NUMBER;
     BEGIN
         SELECT ID_PARAMETRO INTO v_id
-          FROM PARAMETRICA_TIPOS
+          FROM TBL_PARAMETRICA_TIPOS
          WHERE NOMBRE = p_nombre AND VALOR = p_valor;
         RETURN v_id;
     END id_param;
@@ -92,7 +92,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
             RAISE_APPLICATION_ERROR(-20010, 'La cita debe durar entre 10 y 120 minutos');
         END IF;
 
-        SELECT COUNT(*) INTO v_existe FROM PACIENTES WHERE ID_PACIENTE = p_id_paciente;
+        SELECT COUNT(*) INTO v_existe FROM TBL_PACIENTES WHERE ID_PACIENTE = p_id_paciente;
         IF v_existe = 0 THEN
             RAISE_APPLICATION_ERROR(-20003, 'El paciente no existe');
         END IF;
@@ -101,7 +101,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
         BEGIN
             SELECT ID_ESTADO, ID_MEDICO, FECHA_HORA_INICIO, FECHA_HORA_FIN
               INTO v_est_ag, v_medico, v_ag_ini, v_ag_fin
-              FROM AGENDAS_MEDICOS
+              FROM TBL_AGENDAS_MEDICOS
              WHERE ID_AGENDA = p_id_agenda
                FOR UPDATE WAIT 5;
         EXCEPTION
@@ -125,8 +125,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
 
         -- El medico no puede tener dos citas a la vez (EXC_MEDICO_OCUPADO)
         SELECT COUNT(*) INTO v_cruces
-          FROM CITAS_MEDICAS c
-          JOIN AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
+          FROM TBL_CITAS_MEDICAS c
+          JOIN TBL_AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
          WHERE a.ID_MEDICO = v_medico
            AND c.ID_ESTADO <> v_canc
            AND c.FECHA_HORA_INICIO < p_fin
@@ -137,7 +137,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
 
         -- Ni el paciente
         SELECT COUNT(*) INTO v_cruces
-          FROM CITAS_MEDICAS c
+          FROM TBL_CITAS_MEDICAS c
          WHERE c.ID_PACIENTE = p_id_paciente
            AND c.ID_ESTADO   <> v_canc
            AND c.FECHA_HORA_INICIO < p_fin
@@ -146,22 +146,22 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
             RAISE_APPLICATION_ERROR(-20005, 'El paciente ya tiene una cita en ese horario');
         END IF;
 
-        INSERT INTO CITAS_MEDICAS (ID_CITA, ID_PACIENTE, ID_AGENDA, FECHA_HORA_INICIO, FECHA_HORA_FIN, ID_ESTADO)
-        VALUES (SEQ_CITAS_MEDICAS.NEXTVAL, p_id_paciente, p_id_agenda, p_inicio, p_fin, v_prog)
+        INSERT INTO TBL_CITAS_MEDICAS (ID_CITA, ID_PACIENTE, ID_AGENDA, FECHA_HORA_INICIO, FECHA_HORA_FIN, ID_ESTADO)
+        VALUES (SEQ_TBL_CITAS_MEDICAS.NEXTVAL, p_id_paciente, p_id_agenda, p_inicio, p_fin, v_prog)
         RETURNING ID_CITA INTO p_id_cita;
 
         -- Si las citas ya llenan todo el rango, la agenda queda OCUPADA
         -- (SQL no puede llamar la funcion privada minutos(), por eso la cuenta va escrita aqui)
         SELECT NVL(SUM(ROUND((CAST(c.FECHA_HORA_FIN AS DATE) - CAST(c.FECHA_HORA_INICIO AS DATE)) * 24 * 60)), 0)
           INTO v_usados
-          FROM CITAS_MEDICAS c
+          FROM TBL_CITAS_MEDICAS c
          WHERE c.ID_AGENDA = p_id_agenda AND c.ID_ESTADO <> v_canc;
         IF v_usados >= minutos(v_ag_ini, v_ag_fin) THEN
-            UPDATE AGENDAS_MEDICOS SET ID_ESTADO = v_ocup WHERE ID_AGENDA = p_id_agenda;
+            UPDATE TBL_AGENDAS_MEDICOS SET ID_ESTADO = v_ocup WHERE ID_AGENDA = p_id_agenda;
         END IF;
 
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'RESERVAR_CITA', 'CITAS_MEDICAS', p_id_cita,
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'RESERVAR_CITA', 'TBL_CITAS_MEDICAS', p_id_cita,
                 NULL,
                 'id_paciente=' || p_id_paciente || ', id_agenda=' || p_id_agenda
                 || ', cita=' || TO_CHAR(p_inicio, 'YYYY-MM-DD HH24:MI') || ' a ' || TO_CHAR(p_fin, 'HH24:MI')
@@ -199,7 +199,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
         BEGIN
             SELECT ID_PACIENTE, ID_ESTADO, ID_AGENDA
               INTO v_paciente, v_estado, v_agenda
-              FROM CITAS_MEDICAS
+              FROM TBL_CITAS_MEDICAS
              WHERE ID_CITA = p_id_cita
                FOR UPDATE WAIT 5;
         EXCEPTION
@@ -217,14 +217,14 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
             RAISE_APPLICATION_ERROR(-20007, 'Solo se pueden cancelar citas en estado PROGRAMADA');
         END IF;
 
-        UPDATE CITAS_MEDICAS SET ID_ESTADO = v_canc WHERE ID_CITA = p_id_cita;
+        UPDATE TBL_CITAS_MEDICAS SET ID_ESTADO = v_canc WHERE ID_CITA = p_id_cita;
 
         -- Libera el horario: la agenda vuelve a DISPONIBLE y ese tramo se puede reservar de nuevo
-        UPDATE AGENDAS_MEDICOS SET ID_ESTADO = v_disp
+        UPDATE TBL_AGENDAS_MEDICOS SET ID_ESTADO = v_disp
          WHERE ID_AGENDA = v_agenda AND ID_ESTADO = v_ocup;
 
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'CANCELAR_CITA', 'CITAS_MEDICAS', p_id_cita,
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'CANCELAR_CITA', 'TBL_CITAS_MEDICAS', p_id_cita,
                 'estado=PROGRAMADA',
                 'estado=CANCELADA' || CASE WHEN v_motivo IS NOT NULL THEN '; motivo=' || v_motivo END);  -- el motivo va al final: el back lo lee con REGEXP
 
@@ -237,4 +237,4 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
 
 END PKG_GESTION_CITAS;
 /
-SHOW ERRORS
+SHOW ERRORS;
