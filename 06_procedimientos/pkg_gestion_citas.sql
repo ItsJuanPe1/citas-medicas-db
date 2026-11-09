@@ -88,8 +88,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
             RAISE_APPLICATION_ERROR(-20010, 'La cita necesita una hora de inicio y una de fin (la fin despues del inicio)');
         END IF;
         v_min := minutos(p_inicio, p_fin);
-        IF v_min < 10 OR v_min > 120 THEN
-            RAISE_APPLICATION_ERROR(-20010, 'La cita debe durar entre 10 y 120 minutos');
+        IF v_min <> 60 THEN
+            RAISE_APPLICATION_ERROR(-20010, 'Cada cita dura exactamente 1 hora');
         END IF;
 
         SELECT COUNT(*) INTO v_existe FROM TBL_PACIENTES WHERE ID_PACIENTE = p_id_paciente;
