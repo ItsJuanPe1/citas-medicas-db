@@ -150,8 +150,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_AGENDAS AS
             END IF;
             v_min := (TO_NUMBER(SUBSTR(v_hasta(i), 1, 2)) * 60 + TO_NUMBER(SUBSTR(v_hasta(i), 4, 2)))
                    - (TO_NUMBER(SUBSTR(v_desde(i), 1, 2)) * 60 + TO_NUMBER(SUBSTR(v_desde(i), 4, 2)));
-            IF v_min < 30 OR v_min > 720 THEN
-                RAISE_APPLICATION_ERROR(-20302, 'Cada bloque debe durar entre 30 minutos y 12 horas');
+            IF v_min < 60 OR v_min > 720 OR MOD(v_min, 60) <> 0 THEN
+                RAISE_APPLICATION_ERROR(-20302, 'Cada bloque debe durar un numero exacto de horas (entre 1 y 12), porque cada cita dura 1 hora');
             END IF;
             FOR j IN 1 .. i - 1 LOOP
                 IF v_dias(j) = v_dias(i) AND v_desde(j) < v_hasta(i) AND v_hasta(j) > v_desde(i) THEN
@@ -255,8 +255,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_AGENDAS AS
         IF v_horas > 12 THEN
             RAISE_APPLICATION_ERROR(-20302, 'Un horario puede durar maximo 12 horas');
         END IF;
-        IF v_horas < 0.5 THEN
-            RAISE_APPLICATION_ERROR(-20302, 'Un horario debe durar al menos 30 minutos');
+        IF v_horas < 1 OR MOD(ROUND(v_horas * 60), 60) <> 0 THEN
+            RAISE_APPLICATION_ERROR(-20302, 'Un horario debe durar un numero exacto de horas, porque cada cita dura 1 hora');
         END IF;
 
         -- Bloquea al medico: dos pedidos a la vez no pueden crear rangos cruzados
