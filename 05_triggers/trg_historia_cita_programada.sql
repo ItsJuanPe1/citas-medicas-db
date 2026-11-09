@@ -1,11 +1,15 @@
 -- =====================================================================
 -- HU04: no se puede crear una historia clinica de una cita que no este PROGRAMADA.
--- Red de seguridad: aunque alguien inserte directo en HISTORIA_CLINICA (sin pasar por
+-- Red de seguridad: aunque alguien inserte directo en TBL_HISTORIA_CLINICA (sin pasar por
 -- PKG_HISTORIAS_CLINICAS.REGISTRAR_CONSULTA), la regla se cumple. Errores: 20107, 20108, 20109 (cita que aun no inicia).
 -- No modifica la estructura de ninguna tabla.
 -- =====================================================================
+-- =====================================================================
+-- TRG_HISTORIA_CITA_PROGRAMADA
+-- HU04: no se puede crear una historia clinica de una cita que no este PROGRAMADA.
+-- =====================================================================
 CREATE OR REPLACE TRIGGER TRG_HISTORIA_CITA_PROGRAMADA
-BEFORE INSERT ON HISTORIA_CLINICA
+BEFORE INSERT ON TBL_HISTORIA_CLINICA
 FOR EACH ROW
 DECLARE
     v_estado VARCHAR2(100);
@@ -14,8 +18,8 @@ BEGIN
     BEGIN
         SELECT e.VALOR, c.FECHA_HORA_INICIO
           INTO v_estado, v_inicio
-          FROM CITAS_MEDICAS c
-          JOIN PARAMETRICA_TIPOS e ON e.ID_PARAMETRO = c.ID_ESTADO
+          FROM TBL_CITAS_MEDICAS c
+          JOIN TBL_PARAMETRICA_TIPOS e ON e.ID_PARAMETRO = c.ID_ESTADO
          WHERE c.ID_CITA = :NEW.ID_CITA;
     EXCEPTION
         WHEN NO_DATA_FOUND THEN
@@ -32,4 +36,4 @@ BEGIN
     END IF;
 END TRG_HISTORIA_CITA_PROGRAMADA;
 /
-SHOW ERRORS
+SHOW ERRORS;
