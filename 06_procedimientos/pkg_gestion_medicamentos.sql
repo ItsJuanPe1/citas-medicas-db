@@ -1,6 +1,6 @@
 -- =====================================================================
 -- PKG_GESTION_MEDICAMENTOS  (HU05 prescribir y entregar; luego HU06 stock minimo)
--- Inserta en RECETAS_MEDICAS y DETALLE_RECETA, y descuenta STOCK_FARMACIA.
+-- Inserta en TBL_RECETAS_MEDICAS y TBL_DETALLE_RECETA, y descuenta TBL_STOCK_FARMACIA.
 -- No modifica la estructura de ninguna tabla. Errores: 20201-20299.
 --   - PRESCRIBIR_RECETA: el medico crea la receta de una historia clinica (no toca el stock).
 --   - ENTREGAR_MEDICAMENTO: el farmaceutico entrega y se descuenta el stock con FOR UPDATE.
@@ -21,7 +21,7 @@ CREATE OR REPLACE PACKAGE PKG_GESTION_MEDICAMENTOS AS
     EXC_CANTIDAD_INVALIDA    EXCEPTION; PRAGMA EXCEPTION_INIT(EXC_CANTIDAD_INVALIDA,    -20210);
 
     -- p_items: medicamentos separados por '|', y cada uno como id~cantidad~dosis
-    --          ej.: '3~2~1 cada 8 horas|7~1~una al dia'   (maximo 20, sin repetir medicamento)
+    --           ej.: '3~2~1 cada 8 horas|7~1~una al dia'   (maximo 20, sin repetir medicamento)
     -- Si p_id_medico no es NULL, la historia debe ser de una cita de ese medico.
     PROCEDURE PRESCRIBIR_RECETA(
         p_id_historia IN  NUMBER,
@@ -51,7 +51,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
         v_id NUMBER;
     BEGIN
         SELECT ID_PARAMETRO INTO v_id
-          FROM PARAMETRICA_TIPOS
+          FROM TBL_PARAMETRICA_TIPOS
          WHERE NOMBRE = p_nombre AND VALOR = p_valor;
         RETURN v_id;
     END id_param;
@@ -81,9 +81,9 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
         BEGIN
             SELECT a.ID_MEDICO
               INTO v_medico
-              FROM HISTORIA_CLINICA h
-              JOIN CITAS_MEDICAS c   ON c.ID_CITA   = h.ID_CITA
-              JOIN AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
+              FROM TBL_HISTORIA_CLINICA h
+              JOIN TBL_CITAS_MEDICAS c   ON c.ID_CITA   = h.ID_CITA
+              JOIN TBL_AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
              WHERE h.ID_HISTORIA = p_id_historia
                FOR UPDATE OF h.ID_HISTORIA WAIT 5;
         EXCEPTION
@@ -97,7 +97,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
             RAISE_APPLICATION_ERROR(-20202, 'La historia pertenece a otro medico');
         END IF;
 
-        SELECT COUNT(*) INTO v_existe FROM RECETAS_MEDICAS WHERE ID_HISTORIA = p_id_historia;
+        SELECT COUNT(*) INTO v_existe FROM TBL_RECETAS_MEDICAS WHERE ID_HISTORIA = p_id_historia;
         IF v_existe > 0 THEN
             RAISE_APPLICATION_ERROR(-20203, 'Esta consulta ya tiene una receta');
         END IF;
@@ -110,8 +110,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
             RAISE_APPLICATION_ERROR(-20204, 'Una receta puede tener maximo 20 medicamentos');
         END IF;
 
-        INSERT INTO RECETAS_MEDICAS (ID_RECETA, ID_HISTORIA, ID_ESTADO)
-        VALUES (SEQ_RECETAS_MEDICAS.NEXTVAL, p_id_historia, v_no_entregada)
+        INSERT INTO TBL_RECETAS_MEDICAS (ID_RECETA, ID_HISTORIA, ID_ESTADO)
+        VALUES (SEQ_TBL_RECETAS_MEDICAS.NEXTVAL, p_id_historia, v_no_entregada)
         RETURNING ID_RECETA INTO p_id_receta;
 
         FOR i IN 1 .. v_n LOOP
@@ -136,19 +136,19 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
             END IF;
             v_vistos := v_vistos || v_id_med || ':';
 
-            SELECT COUNT(*) INTO v_existe FROM MEDICAMENTOS WHERE ID_MEDICAMENTO = v_id_med;
+            SELECT COUNT(*) INTO v_existe FROM TBL_MEDICAMENTOS WHERE ID_MEDICAMENTO = v_id_med;
             IF v_existe = 0 THEN
                 RAISE_APPLICATION_ERROR(-20205, 'El medicamento ' || v_id_med || ' no existe');
             END IF;
 
-            INSERT INTO DETALLE_RECETA (ID_DETALLE, ID_RECETA, ID_MEDICAMENTO, ID_ESTADO,
-                                        CANTIDAD, CANTIDAD_PENDIENTE, DOSIS)
-            VALUES (SEQ_DETALLE_RECETA.NEXTVAL, p_id_receta, v_id_med, v_det_no,
+            INSERT INTO TBL_DETALLE_RECETA (ID_DETALLE, ID_RECETA, ID_MEDICAMENTO, ID_ESTADO,
+                                                CANTIDAD, CANTIDAD_PENDIENTE, DOSIS)
+            VALUES (SEQ_TBL_DETALLE_RECETA.NEXTVAL, p_id_receta, v_id_med, v_det_no,
                     v_cant, v_cant, v_dosis);
         END LOOP;
 
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'PRESCRIBIR_RECETA', 'RECETAS_MEDICAS', p_id_receta,
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'PRESCRIBIR_RECETA', 'TBL_RECETAS_MEDICAS', p_id_receta,
                 NULL, 'id_historia=' || p_id_historia || '; medicamentos=' || v_n);
 
         COMMIT;
@@ -178,7 +178,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
         BEGIN
             SELECT ID_MEDICAMENTO, CANTIDAD_PENDIENTE
               INTO v_med, v_pend
-              FROM DETALLE_RECETA
+              FROM TBL_DETALLE_RECETA
              WHERE ID_DETALLE = p_id_detalle
                FOR UPDATE WAIT 5;
         EXCEPTION
@@ -195,7 +195,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
         BEGIN
             SELECT CANTIDAD_DISPONIBLE
               INTO v_disp
-              FROM STOCK_FARMACIA
+              FROM TBL_STOCK_FARMACIA
              WHERE ID_MEDICAMENTO = v_med
                FOR UPDATE WAIT 5;
         EXCEPTION
@@ -222,18 +222,18 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
         END IF;
         p_pendientes := v_pend - p_entregadas;
 
-        UPDATE STOCK_FARMACIA
+        UPDATE TBL_STOCK_FARMACIA
            SET CANTIDAD_DISPONIBLE = CANTIDAD_DISPONIBLE - p_entregadas
          WHERE ID_MEDICAMENTO = v_med;
 
-        UPDATE DETALLE_RECETA
+        UPDATE TBL_DETALLE_RECETA
            SET CANTIDAD_PENDIENTE = p_pendientes,
                ID_FARMACEUTICO    = NVL(p_id_farmaceutico, ID_FARMACEUTICO),
                ID_ESTADO          = CASE WHEN p_pendientes = 0 THEN v_entregado ELSE ID_ESTADO END
          WHERE ID_DETALLE = p_id_detalle;
 
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'ENTREGAR_MEDICAMENTO', 'DETALLE_RECETA', p_id_detalle,
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'ENTREGAR_MEDICAMENTO', 'TBL_DETALLE_RECETA', p_id_detalle,
                 'pendiente=' || v_pend || '; stock=' || v_disp,
                 'pendiente=' || p_pendientes || '; stock=' || (v_disp - p_entregadas));
 
@@ -246,4 +246,4 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
 
 END PKG_GESTION_MEDICAMENTOS;
 /
-SHOW ERRORS
+SHOW ERRORS;
