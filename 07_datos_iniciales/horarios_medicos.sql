@@ -4,7 +4,7 @@
 -- futuras sin citas de cada medico (las que ya tienen citas no se tocan).
 -- Despues cada medico puede cambiar el suyo desde la pantalla "Horarios".
 -- =====================================================================
-SET SERVEROUTPUT ON;
+SET SERVEROUTPUT ON
 DECLARE
     TYPE t_pat IS TABLE OF VARCHAR2(200) INDEX BY PLS_INTEGER;
     v_pat t_pat;
@@ -24,9 +24,4 @@ BEGIN
     END LOOP;
 END;
 /
-
-SELECT ID_MEDICO, COUNT(*) AS AGENDAS_FUTURAS 
-  FROM TBL_AGENDAS_MEDICOS 
- WHERE FECHA_HORA_FIN > SYSTIMESTAMP 
- GROUP BY ID_MEDICO 
- ORDER BY ID_MEDICO;
+SELECT ID_MEDICO, COUNT(*) AS AGENDAS_FUTURAS FROM TBL_AGENDAS_MEDICOS WHERE FECHA_HORA_FIN > SYSTIMESTAMP GROUP BY ID_MEDICO ORDER BY ID_MEDICO;
