@@ -1,6 +1,6 @@
 -- =====================================================================
 -- PKG_HISTORIAS_CLINICAS  (HU03 registrar consulta; luego HU04, HU07, HU08)
--- Inserta en HISTORIA_CLINICA y actualiza el estado de CITAS_MEDICAS. No modifica la estructura de ninguna tabla.
+-- Inserta en TBL_HISTORIA_CLINICA y actualiza el estado de TBL_CITAS_MEDICAS. No modifica la estructura de ninguna tabla.
 -- Errores: rango 20101-20199. (20106: cita vencida; 20109: cita que aun no inicia)
 -- =====================================================================
 CREATE OR REPLACE PACKAGE PKG_HISTORIAS_CLINICAS AS
@@ -25,7 +25,7 @@ CREATE OR REPLACE PACKAGE PKG_HISTORIAS_CLINICAS AS
 
     -- Pasa a NO_ASISTIO las citas PROGRAMADA cuyo horario ya termino. Un COMMIT al final.
     -- La llama un job del back cada minuto. Devuelve cuantas marco. Si el estado
-    -- NO_ASISTIO no existe en PARAMETRICA_TIPOS no hace nada (ver db/03_datos).
+    -- NO_ASISTIO no existe en TBL_PARAMETRICA_TIPOS no hace nada (ver db/03_datos).
     PROCEDURE MARCAR_NO_ASISTIDAS(p_marcadas OUT NUMBER);
 
 END PKG_HISTORIAS_CLINICAS;
@@ -37,7 +37,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
         v_id NUMBER;
     BEGIN
         SELECT ID_PARAMETRO INTO v_id
-          FROM PARAMETRICA_TIPOS
+          FROM TBL_PARAMETRICA_TIPOS
          WHERE NOMBRE = p_nombre AND VALOR = p_valor;
         RETURN v_id;
     END id_param;
@@ -75,8 +75,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
         BEGIN
             SELECT c.ID_ESTADO, a.ID_MEDICO, c.FECHA_HORA_FIN, c.FECHA_HORA_INICIO
               INTO v_estado, v_medico, v_fin, v_inicio
-              FROM CITAS_MEDICAS c
-              JOIN AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
+              FROM TBL_CITAS_MEDICAS c
+              JOIN TBL_AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
              WHERE c.ID_CITA = p_id_cita
                FOR UPDATE OF c.ID_ESTADO WAIT 5;
         EXCEPTION
@@ -104,15 +104,15 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
             RAISE_APPLICATION_ERROR(-20106, 'El horario de esta cita ya termino; no se puede registrar la consulta');
         END IF;
 
-        INSERT INTO HISTORIA_CLINICA (ID_HISTORIA, ID_CITA, DIAGNOSTICO, NOTAS_MEDICAS)
-        VALUES (SEQ_HISTORIA_CLINICA.NEXTVAL, p_id_cita, v_diagnostico, v_notas)
+        INSERT INTO TBL_HISTORIA_CLINICA (ID_HISTORIA, ID_CITA, DIAGNOSTICO, NOTAS_MEDICAS)
+        VALUES (SEQ_TBL_HISTORIA_CLINICA.NEXTVAL, p_id_cita, v_diagnostico, v_notas)
         RETURNING ID_HISTORIA INTO p_id_historia;
 
-        UPDATE CITAS_MEDICAS SET ID_ESTADO = v_aten WHERE ID_CITA = p_id_cita;
+        UPDATE TBL_CITAS_MEDICAS SET ID_ESTADO = v_aten WHERE ID_CITA = p_id_cita;
 
         -- La auditoria no guarda el contenido clinico, solo el cambio de estado
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'REGISTRAR_CONSULTA', 'HISTORIA_CLINICA', p_id_historia,
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'REGISTRAR_CONSULTA', 'TBL_HISTORIA_CLINICA', p_id_historia,
                 'id_cita=' || p_id_cita || '; estado=PROGRAMADA',
                 'id_cita=' || p_id_cita || '; estado=ATENDIDA');
 
@@ -135,15 +135,15 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
         END;
 
         FOR r IN (SELECT c.ID_CITA
-                    FROM CITAS_MEDICAS c
-                    JOIN AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
+                    FROM TBL_CITAS_MEDICAS c
+                    JOIN TBL_AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
                    WHERE c.ID_ESTADO = v_prog
                      AND c.FECHA_HORA_FIN < LOCALTIMESTAMP
                      FOR UPDATE OF c.ID_ESTADO SKIP LOCKED) LOOP
-            UPDATE CITAS_MEDICAS SET ID_ESTADO = v_noas WHERE ID_CITA = r.ID_CITA;
+            UPDATE TBL_CITAS_MEDICAS SET ID_ESTADO = v_noas WHERE ID_CITA = r.ID_CITA;
             -- ID_USUARIO 0 = sistema
-            INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-            VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, 0, 'MARCAR_NO_ASISTIO', 'CITAS_MEDICAS', r.ID_CITA,
+            INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+            VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, 0, 'MARCAR_NO_ASISTIO', 'TBL_CITAS_MEDICAS', r.ID_CITA,
                     'estado=PROGRAMADA', 'estado=NO_ASISTIO');
             p_marcadas := p_marcadas + 1;
         END LOOP;
@@ -156,4 +156,4 @@ CREATE OR REPLACE PACKAGE BODY PKG_HISTORIAS_CLINICAS AS
 
 END PKG_HISTORIAS_CLINICAS;
 /
-SHOW ERRORS
+SHOW ERRORS;
