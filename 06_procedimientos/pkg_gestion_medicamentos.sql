@@ -21,7 +21,7 @@ CREATE OR REPLACE PACKAGE PKG_GESTION_MEDICAMENTOS AS
     EXC_CANTIDAD_INVALIDA    EXCEPTION; PRAGMA EXCEPTION_INIT(EXC_CANTIDAD_INVALIDA,    -20210);
 
     -- p_items: medicamentos separados por '|', y cada uno como id~cantidad~dosis
-    --           ej.: '3~2~1 cada 8 horas|7~1~una al dia'   (maximo 20, sin repetir medicamento)
+    --          ej.: '3~2~1 cada 8 horas|7~1~una al dia'   (maximo 20, sin repetir medicamento)
     -- Si p_id_medico no es NULL, la historia debe ser de una cita de ese medico.
     PROCEDURE PRESCRIBIR_RECETA(
         p_id_historia IN  NUMBER,
@@ -142,7 +142,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
             END IF;
 
             INSERT INTO TBL_DETALLE_RECETA (ID_DETALLE, ID_RECETA, ID_MEDICAMENTO, ID_ESTADO,
-                                                CANTIDAD, CANTIDAD_PENDIENTE, DOSIS)
+                                        CANTIDAD, CANTIDAD_PENDIENTE, DOSIS)
             VALUES (SEQ_TBL_DETALLE_RECETA.NEXTVAL, p_id_receta, v_id_med, v_det_no,
                     v_cant, v_cant, v_dosis);
         END LOOP;
@@ -246,4 +246,4 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
 
 END PKG_GESTION_MEDICAMENTOS;
 /
-SHOW ERRORS;
+SHOW ERRORS
