@@ -118,7 +118,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
     -- Traduce los choques con las restricciones UNIQUE a mensajes claros
     PROCEDURE traducir_duplicado(p_msg VARCHAR2) IS
     BEGIN
-        IF INSTR(p_msg, 'UQ_USUARIOS_USERNAME') > 0 OR INSTR(p_msg, 'UQ_TBL_USUARIOS_USERNAME') > 0 THEN
+        IF INSTR(p_msg, 'UQ_TBL_USUARIOS_USERNAME') > 0 THEN
             RAISE_APPLICATION_ERROR(-20501, 'Ese nombre de usuario ya esta en uso');
         ELSIF INSTR(p_msg, '_DOCUMENTO') > 0 THEN
             RAISE_APPLICATION_ERROR(-20502, 'Ese documento ya esta registrado');
@@ -132,7 +132,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
     BEGIN
         SELECT ID_ROL INTO v FROM TBL_ROLES WHERE NOMBRE = p_nombre;
         RETURN v;
-    EXCEPTIONS
+    EXCEPTION
         WHEN NO_DATA_FOUND THEN
             RAISE_APPLICATION_ERROR(-20506, 'Rol no valido');
     END id_rol;
@@ -396,4 +396,4 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
 
 END PKG_USUARIOS;
 /
-SHOW ERRORS;
+SHOW ERRORS
