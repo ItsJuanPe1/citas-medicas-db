@@ -1,6 +1,6 @@
 -- =====================================================================
 -- PKG_USUARIOS: registro de pacientes y gestion de cuentas (alta de personal, estado, clave).
--- Inserta en USUARIOS y en PACIENTES / MEDICOS / FARMACEUTICOS. No modifica la estructura de ninguna tabla.
+-- Inserta en TBL_USUARIOS y en TBL_PACIENTES / TBL_MEDICOS / TBL_FARMACEUTICOS. No modifica la estructura de ninguna tabla.
 -- La clave se guarda como SHA-256 en hex mayuscula (igual que los usuarios existentes).
 -- Errores: 20501-20599. (20511: clave actual incorrecta; 20512: la nueva clave es igual a la actual)
 -- =====================================================================
@@ -118,7 +118,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
     -- Traduce los choques con las restricciones UNIQUE a mensajes claros
     PROCEDURE traducir_duplicado(p_msg VARCHAR2) IS
     BEGIN
-        IF INSTR(p_msg, 'UQ_USUARIOS_USERNAME') > 0 THEN
+        IF INSTR(p_msg, 'UQ_USUARIOS_USERNAME') > 0 OR INSTR(p_msg, 'UQ_TBL_USUARIOS_USERNAME') > 0 THEN
             RAISE_APPLICATION_ERROR(-20501, 'Ese nombre de usuario ya esta en uso');
         ELSIF INSTR(p_msg, '_DOCUMENTO') > 0 THEN
             RAISE_APPLICATION_ERROR(-20502, 'Ese documento ya esta registrado');
@@ -130,17 +130,17 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
     FUNCTION id_rol(p_nombre VARCHAR2) RETURN NUMBER IS
         v NUMBER;
     BEGIN
-        SELECT ID_ROL INTO v FROM ROLES WHERE NOMBRE = p_nombre;
+        SELECT ID_ROL INTO v FROM TBL_ROLES WHERE NOMBRE = p_nombre;
         RETURN v;
-    EXCEPTION
+    EXCEPTIONS
         WHEN NO_DATA_FOUND THEN
             RAISE_APPLICATION_ERROR(-20506, 'Rol no valido');
     END id_rol;
 
     PROCEDURE auditar(p_quien NUMBER, p_accion VARCHAR2, p_id NUMBER, p_antes VARCHAR2, p_despues VARCHAR2) IS
     BEGIN
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_quien, p_accion, 'USUARIOS', p_id, p_antes, p_despues);
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_quien, p_accion, 'TBL_USUARIOS', p_id, p_antes, p_despues);
     END auditar;
 
     ------------------------------------------------------------ REGISTRAR_PACIENTE
@@ -174,12 +174,12 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
         v_rol  := id_rol('PACIENTE');
         v_hash := hash_clave(p_password);  -- las funciones del paquete no pueden ir dentro del INSERT
 
-        INSERT INTO PACIENTES (ID_PACIENTE, DOCUMENTO, NOMBRE, APELLIDO, FECHA_NACIMIENTO, TELEFONO, EMAIL)
-        VALUES (SEQ_PACIENTES.NEXTVAL, v_doc, v_nom, v_ape, p_fecha_nac, v_tel, v_mail)
+        INSERT INTO TBL_PACIENTES (ID_PACIENTE, DOCUMENTO, NOMBRE, APELLIDO, FECHA_NACIMIENTO, TELEFONO, EMAIL)
+        VALUES (SEQ_TBL_PACIENTES.NEXTVAL, v_doc, v_nom, v_ape, p_fecha_nac, v_tel, v_mail)
         RETURNING ID_PACIENTE INTO v_pac;
 
-        INSERT INTO USUARIOS (ID_USUARIO, ID_ROL, USERNAME, PASSWORD, ID_ENTIDAD, ESTADO)
-        VALUES (SEQ_USUARIOS.NEXTVAL, v_rol, v_user, v_hash, v_pac, 'ACTIVO')
+        INSERT INTO TBL_USUARIOS (ID_USUARIO, ID_ROL, USERNAME, PASSWORD, ID_ENTIDAD, ESTADO)
+        VALUES (SEQ_TBL_USUARIOS.NEXTVAL, v_rol, v_user, v_hash, v_pac, 'ACTIVO')
         RETURNING ID_USUARIO INTO p_id_usuario;
 
         auditar(p_id_usuario, 'REGISTRAR_PACIENTE', p_id_usuario, NULL, 'usuario=' || v_user || '; paciente=' || v_pac);
@@ -230,24 +230,24 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
         END IF;
 
         IF p_rol = 'MEDICO' THEN
-            SELECT COUNT(*) INTO v_n FROM PARAMETRICA_TIPOS
+            SELECT COUNT(*) INTO v_n FROM TBL_PARAMETRICA_TIPOS
              WHERE ID_PARAMETRO = p_id_especialidad AND NOMBRE = 'ESPECIALIDAD';
             IF v_n = 0 THEN
                 RAISE_APPLICATION_ERROR(-20507, 'La especialidad no es valida');
             END IF;
-            INSERT INTO MEDICOS (ID_MEDICO, DOCUMENTO, NOMBRE, APELLIDO, ID_ESPECIALIDAD, TELEFONO, EMAIL)
-            VALUES (SEQ_MEDICOS.NEXTVAL, v_doc, v_nom, v_ape, p_id_especialidad, v_tel, v_mail)
+            INSERT INTO TBL_MEDICOS (ID_MEDICO, DOCUMENTO, NOMBRE, APELLIDO, ID_ESPECIALIDAD, TELEFONO, EMAIL)
+            VALUES (SEQ_TBL_MEDICOS.NEXTVAL, v_doc, v_nom, v_ape, p_id_especialidad, v_tel, v_mail)
             RETURNING ID_MEDICO INTO v_ent;
         ELSIF p_rol = 'FARMACEUTICO' THEN
-            INSERT INTO FARMACEUTICOS (ID_FARMACEUTICO, DOCUMENTO, NOMBRE, APELLIDO, TELEFONO, EMAIL)
-            VALUES (SEQ_FARMACEUTICOS.NEXTVAL, v_doc, v_nom, v_ape, v_tel, v_mail)
+            INSERT INTO TBL_FARMACEUTICOS (ID_FARMACEUTICO, DOCUMENTO, NOMBRE, APELLIDO, TELEFONO, EMAIL)
+            VALUES (SEQ_TBL_FARMACEUTICOS.NEXTVAL, v_doc, v_nom, v_ape, v_tel, v_mail)
             RETURNING ID_FARMACEUTICO INTO v_ent;
         END IF;
 
         v_rolid := id_rol(p_rol);
         v_hash  := hash_clave(p_password);
-        INSERT INTO USUARIOS (ID_USUARIO, ID_ROL, USERNAME, PASSWORD, ID_ENTIDAD, ESTADO, DEBE_CAMBIAR_CLAVE)
-        VALUES (SEQ_USUARIOS.NEXTVAL, v_rolid, v_user, v_hash, v_ent, 'ACTIVO', 'S')
+        INSERT INTO TBL_USUARIOS (ID_USUARIO, ID_ROL, USERNAME, PASSWORD, ID_ENTIDAD, ESTADO, DEBE_CAMBIAR_CLAVE)
+        VALUES (SEQ_TBL_USUARIOS.NEXTVAL, v_rolid, v_user, v_hash, v_ent, 'ACTIVO', 'S')
         RETURNING ID_USUARIO INTO p_id_usuario;
 
         auditar(p_id_admin, 'CREAR_PERSONAL', p_id_usuario, NULL,
@@ -280,14 +280,14 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
             RAISE_APPLICATION_ERROR(-20509, 'No puedes desactivar tu propia cuenta');
         END IF;
         BEGIN
-            SELECT ESTADO INTO v_antes FROM USUARIOS WHERE ID_USUARIO = p_id_usuario FOR UPDATE WAIT 5;
+            SELECT ESTADO INTO v_antes FROM TBL_USUARIOS WHERE ID_USUARIO = p_id_usuario FOR UPDATE WAIT 5;
         EXCEPTION
             WHEN NO_DATA_FOUND THEN
                 RAISE_APPLICATION_ERROR(-20508, 'El usuario no existe');
             WHEN e_bloqueado THEN
                 RAISE_APPLICATION_ERROR(-20510, 'Este usuario se esta modificando, intenta de nuevo');
         END;
-        UPDATE USUARIOS SET ESTADO = p_estado WHERE ID_USUARIO = p_id_usuario;
+        UPDATE TBL_USUARIOS SET ESTADO = p_estado WHERE ID_USUARIO = p_id_usuario;
         auditar(p_id_admin, 'CAMBIAR_ESTADO_USUARIO', p_id_usuario, 'estado=' || v_antes, 'estado=' || p_estado);
         COMMIT;
     EXCEPTION
@@ -306,7 +306,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
     BEGIN
         validar_clave(p_nueva);
         v_hash := hash_clave(p_nueva);
-        UPDATE USUARIOS SET PASSWORD = v_hash, DEBE_CAMBIAR_CLAVE = 'S' WHERE ID_USUARIO = p_id_usuario;
+        UPDATE TBL_USUARIOS SET PASSWORD = v_hash, DEBE_CAMBIAR_CLAVE = 'S' WHERE ID_USUARIO = p_id_usuario;
         IF SQL%ROWCOUNT = 0 THEN
             RAISE_APPLICATION_ERROR(-20508, 'El usuario no existe');
         END IF;
@@ -331,7 +331,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
     BEGIN
         validar_clave(p_nueva);
         BEGIN
-            SELECT PASSWORD INTO v_hash FROM USUARIOS WHERE ID_USUARIO = p_id_usuario FOR UPDATE WAIT 5;
+            SELECT PASSWORD INTO v_hash FROM TBL_USUARIOS WHERE ID_USUARIO = p_id_usuario FOR UPDATE WAIT 5;
         EXCEPTION
             WHEN NO_DATA_FOUND THEN
                 RAISE_APPLICATION_ERROR(-20508, 'El usuario no existe');
@@ -345,7 +345,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
         IF v_nuevo = v_hash THEN
             RAISE_APPLICATION_ERROR(-20512, 'La nueva contrasena debe ser distinta de la actual');
         END IF;
-        UPDATE USUARIOS SET PASSWORD = v_nuevo, DEBE_CAMBIAR_CLAVE = 'N' WHERE ID_USUARIO = p_id_usuario;
+        UPDATE TBL_USUARIOS SET PASSWORD = v_nuevo, DEBE_CAMBIAR_CLAVE = 'N' WHERE ID_USUARIO = p_id_usuario;
         auditar(p_id_usuario, 'CAMBIAR_CLAVE', p_id_usuario, NULL, 'clave cambiada por el usuario');
         COMMIT;
     EXCEPTION
@@ -376,12 +376,12 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
             RAISE_APPLICATION_ERROR(-20504, 'La fecha de nacimiento no es valida');
         END IF;
 
-        INSERT INTO PACIENTES (ID_PACIENTE, DOCUMENTO, NOMBRE, APELLIDO, FECHA_NACIMIENTO, TELEFONO, EMAIL)
-        VALUES (SEQ_PACIENTES.NEXTVAL, v_doc, v_nom, v_ape, p_fecha_nac, v_tel, v_mail)
+        INSERT INTO TBL_PACIENTES (ID_PACIENTE, DOCUMENTO, NOMBRE, APELLIDO, FECHA_NACIMIENTO, TELEFONO, EMAIL)
+        VALUES (SEQ_TBL_PACIENTES.NEXTVAL, v_doc, v_nom, v_ape, p_fecha_nac, v_tel, v_mail)
         RETURNING ID_PACIENTE INTO p_id_paciente;
 
-        INSERT INTO LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'REGISTRAR_PACIENTE_RECEPCION', 'PACIENTES', p_id_paciente,
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, p_id_usuario, 'REGISTRAR_PACIENTE_RECEPCION', 'TBL_PACIENTES', p_id_paciente,
                 NULL, 'documento=' || v_doc);
         COMMIT;
     EXCEPTION
@@ -396,4 +396,4 @@ CREATE OR REPLACE PACKAGE BODY PKG_USUARIOS AS
 
 END PKG_USUARIOS;
 /
-SHOW ERRORS
+SHOW ERRORS;
