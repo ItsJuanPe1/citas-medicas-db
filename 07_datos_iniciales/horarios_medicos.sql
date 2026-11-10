@@ -7,20 +7,20 @@
 SET SERVEROUTPUT ON
 DECLARE
     TYPE t_pat IS TABLE OF VARCHAR2(200) INDEX BY PLS_INTEGER;
-    v_pat t_pat;
-    v_n   NUMBER;
-    v_i   PLS_INTEGER := 0;
+    vc_pat t_pat;
+    vn_n   NUMBER;
+    vn_i   PLS_INTEGER := 0;
 BEGIN
-    v_pat(0) := 'LUNES~08:00~12:00|MIERCOLES~08:00~12:00|VIERNES~08:00~12:00';
-    v_pat(1) := 'MARTES~14:00~18:00|JUEVES~14:00~18:00';
-    v_pat(2) := 'LUNES~14:00~18:00|MARTES~08:00~12:00|JUEVES~08:00~12:00';
-    v_pat(3) := 'MIERCOLES~08:00~17:00|SABADO~08:00~12:00';
-    v_pat(4) := 'MARTES~16:00~19:00|JUEVES~16:00~19:00|VIERNES~14:00~18:00';
+    vc_pat(0) := 'LUNES~08:00~12:00|MIERCOLES~08:00~12:00|VIERNES~08:00~12:00';
+    vc_pat(1) := 'MARTES~14:00~18:00|JUEVES~14:00~18:00';
+    vc_pat(2) := 'LUNES~14:00~18:00|MARTES~08:00~12:00|JUEVES~08:00~12:00';
+    vc_pat(3) := 'MIERCOLES~08:00~17:00|SABADO~08:00~12:00';
+    vc_pat(4) := 'MARTES~16:00~19:00|JUEVES~16:00~19:00|VIERNES~14:00~18:00';
 
-    FOR m IN (SELECT ID_MEDICO FROM TBL_MEDICOS ORDER BY ID_MEDICO) LOOP
-        PKG_AGENDAS.GUARDAR_HORARIO_SEMANAL(m.ID_MEDICO, v_pat(MOD(v_i, 5)), 0, 52, v_n);
-        DBMS_OUTPUT.PUT_LINE('Medico ' || m.ID_MEDICO || ': ' || v_n || ' agendas');
-        v_i := v_i + 1;
+    FOR vr_m IN (SELECT ID_MEDICO FROM TBL_MEDICOS ORDER BY ID_MEDICO) LOOP
+        PKG_AGENDAS.PRO_GUARDAR_HORARIO_SEMANAL(vr_m.ID_MEDICO, vc_pat(MOD(vn_i, 5)), 0, 52, vn_n);
+        DBMS_OUTPUT.PUT_LINE('Medico ' || vr_m.ID_MEDICO || ': ' || vn_n || ' agendas');
+        vn_i := vn_i + 1;
     END LOOP;
 END;
 /
