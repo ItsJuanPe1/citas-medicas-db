@@ -8,7 +8,7 @@ COMMIT;
 SET SERVEROUTPUT ON
 DECLARE
   TYPE t_vc IS TABLE OF VARCHAR2(40);
-  c_tablas t_vc := t_vc(
+  vc_tablas t_vc := t_vc(
     'TBL_ROLES',
     'TBL_USUARIOS',
     'TBL_PARAMETRICA_TIPOS',
@@ -23,7 +23,7 @@ DECLARE
     'TBL_MEDICAMENTOS',
     'TBL_DETALLE_RECETA',
     'TBL_STOCK_FARMACIA');
-  c_pks t_vc := t_vc(
+  vc_pks t_vc := t_vc(
     'ID_ROL',
     'ID_USUARIO',
     'ID_PARAMETRO',
@@ -38,14 +38,14 @@ DECLARE
     'ID_MEDICAMENTO',
     'ID_DETALLE',
     'ID_STOCK');
-  v_max NUMBER;
+  vn_max NUMBER;
 BEGIN
-  FOR i IN 1..c_tablas.COUNT LOOP
-    EXECUTE IMMEDIATE 'SELECT NVL(MAX(' || c_pks(i) || '), 0) FROM ' || c_tablas(i) INTO v_max;
-    EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_' || c_tablas(i);
-    EXECUTE IMMEDIATE 'CREATE SEQUENCE SEQ_' || c_tablas(i) || ' START WITH ' || (v_max + 1) ||
+  FOR vn_i IN 1..vc_tablas.COUNT LOOP
+    EXECUTE IMMEDIATE 'SELECT NVL(MAX(' || vc_pks(vn_i) || '), 0) FROM ' || vc_tablas(vn_i) INTO vn_max;
+    EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_' || vc_tablas(vn_i);
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE SEQ_' || vc_tablas(vn_i) || ' START WITH ' || (vn_max + 1) ||
                       ' INCREMENT BY 1 NOCACHE';
-    DBMS_OUTPUT.PUT_LINE(RPAD('SEQ_' || c_tablas(i), 28) || ' -> siguiente valor: ' || (v_max + 1));
+    DBMS_OUTPUT.PUT_LINE(RPAD('SEQ_' || vc_tablas(vn_i), 28) || ' -> siguiente valor: ' || (vn_max + 1));
   END LOOP;
 END;
 /
