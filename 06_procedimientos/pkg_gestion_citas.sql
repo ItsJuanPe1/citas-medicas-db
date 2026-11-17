@@ -1,5 +1,5 @@
 -- =====================================================================
--- PKG_GESTION_CITAS  (HU01 reservar, HU02 cancelar; luego HU09)
+-- PKG_GESTION_CITAS  (HU01 reservar, HU02 cancelar, HU09 cancelacion masiva)
 -- Modelo 1 a N: una agenda es un RANGO de horas del medico (ej. martes 7:00 a 12:00)
 -- y puede tener varias citas; cada cita guarda su propia hora de inicio y fin.
 -- Estado de la agenda: DISPONIBLE mientras queden minutos libres; OCUPADA cuando las citas
@@ -19,6 +19,8 @@ CREATE OR REPLACE PACKAGE PKG_GESTION_CITAS AS
     EX_MOTIVO_OBLIGATORIO   EXCEPTION; PRAGMA EXCEPTION_INIT(EX_MOTIVO_OBLIGATORIO,   -20009);
     EX_DURACION_INVALIDA    EXCEPTION; PRAGMA EXCEPTION_INIT(EX_DURACION_INVALIDA,    -20010);
     EX_FUERA_DE_AGENDA      EXCEPTION; PRAGMA EXCEPTION_INIT(EX_FUERA_DE_AGENDA,      -20011);
+    EX_MEDICO_INEXISTENTE   EXCEPTION; PRAGMA EXCEPTION_INIT(EX_MEDICO_INEXISTENTE,   -20012);
+    EX_FECHA_INVALIDA       EXCEPTION; PRAGMA EXCEPTION_INIT(EX_FECHA_INVALIDA,       -20013);
 
     -- HU01. pt_inicio y pt_fin definen la cita y deben caer dentro del rango de la agenda.
     -- Dura entre 10 y 120 minutos. No puede cruzarse con otra cita del medico ni del paciente.
@@ -38,6 +40,18 @@ CREATE OR REPLACE PACKAGE PKG_GESTION_CITAS AS
         pn_id_usuario  IN NUMBER,
         ps_motivo      IN VARCHAR2,
         pn_id_paciente IN NUMBER DEFAULT NULL
+    );
+
+    -- HU09. Cancela todas las citas PROGRAMADAS de un medico en una fecha (BULK COLLECT + FORALL),
+    -- deja la trazabilidad en la bitacora y bloquea las agendas de ese dia (quedan OCUPADA) para
+    -- que nadie reserve con un medico que no va a atender. El motivo es opcional (minimo 5 caracteres).
+    -- pn_canceladas devuelve cuantas citas se cancelaron (puede ser 0).
+    PROCEDURE PRO_CANCELAR_CITAS_MEDICO(
+        pn_id_medico  IN  NUMBER,
+        pd_fecha      IN  DATE,
+        ps_motivo     IN  VARCHAR2,
+        pn_id_usuario IN  NUMBER,
+        pn_canceladas OUT NUMBER
     );
 
 END PKG_GESTION_CITAS;
@@ -234,6 +248,93 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
             ROLLBACK;
             RAISE;
     END PRO_CANCELAR_CITA;
+
+    ---------------------------------------------------------------- HU09
+    PROCEDURE PRO_CANCELAR_CITAS_MEDICO(
+        pn_id_medico  IN  NUMBER,
+        pd_fecha      IN  DATE,
+        ps_motivo     IN  VARCHAR2,
+        pn_id_usuario IN  NUMBER,
+        pn_canceladas OUT NUMBER
+    ) IS
+        TYPE t_ids IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
+        vc_citas     t_ids;
+        vd_dia       DATE := TRUNC(pd_fecha);
+        vs_motivo    VARCHAR2(255) := SUBSTR(TRIM(ps_motivo), 1, 255);
+        vs_despues   VARCHAR2(500);
+        vn_prog      NUMBER := FN_ID_PARAM('ESTADO_CITA',   'PROGRAMADA');
+        vn_canc      NUMBER := FN_ID_PARAM('ESTADO_CITA',   'CANCELADA');
+        vn_disp      NUMBER := FN_ID_PARAM('ESTADO_AGENDA', 'DISPONIBLE');
+        vn_ocup      NUMBER := FN_ID_PARAM('ESTADO_AGENDA', 'OCUPADA');
+        vn_existe    NUMBER;
+        vn_bloqueadas NUMBER;
+        ex_bloqueado EXCEPTION;
+        PRAGMA EXCEPTION_INIT(ex_bloqueado, -30006);
+    BEGIN
+        IF vd_dia IS NULL OR vd_dia < TRUNC(SYSDATE) THEN
+            RAISE_APPLICATION_ERROR(-20013, 'La fecha debe ser hoy o una fecha futura');
+        END IF;
+        IF vs_motivo IS NOT NULL AND LENGTH(vs_motivo) < 5 THEN
+            RAISE_APPLICATION_ERROR(-20009, 'El motivo debe tener minimo 5 caracteres');
+        END IF;
+
+        SELECT COUNT(*) INTO vn_existe FROM TBL_MEDICOS WHERE ID_MEDICO = pn_id_medico;
+        IF vn_existe = 0 THEN
+            RAISE_APPLICATION_ERROR(-20012, 'El medico no existe');
+        END IF;
+
+        -- Trae y bloquea de una vez todas las citas programadas del medico ese dia
+        BEGIN
+            SELECT c.ID_CITA
+              BULK COLLECT INTO vc_citas
+              FROM TBL_CITAS_MEDICAS c
+              JOIN TBL_AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
+             WHERE a.ID_MEDICO = pn_id_medico
+               AND c.ID_ESTADO = vn_prog
+               AND c.FECHA_HORA_INICIO >= vd_dia
+               AND c.FECHA_HORA_INICIO <  vd_dia + 1
+             ORDER BY c.ID_CITA
+               FOR UPDATE OF c.ID_ESTADO WAIT 5;
+        EXCEPTION
+            WHEN ex_bloqueado THEN
+                RAISE_APPLICATION_ERROR(-20007, 'Hay citas de ese dia en uso por otra persona, intenta de nuevo');
+        END;
+
+        pn_canceladas := vc_citas.COUNT;
+        vs_despues := 'estado=CANCELADA; motivo=Inasistencia del medico'
+                      || CASE WHEN vs_motivo IS NOT NULL THEN ': ' || vs_motivo END;
+
+        IF vc_citas.COUNT > 0 THEN
+            FORALL vn_i IN 1 .. vc_citas.COUNT
+                UPDATE TBL_CITAS_MEDICAS SET ID_ESTADO = vn_canc WHERE ID_CITA = vc_citas(vn_i);
+
+            -- una fila por cita, con la misma accion que HU02: el paciente ve el motivo en su pantalla
+            FORALL vn_i IN 1 .. vc_citas.COUNT
+                INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+                VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, pn_id_usuario, 'CANCELAR_CITA', 'TBL_CITAS_MEDICAS',
+                        vc_citas(vn_i), 'estado=PROGRAMADA', vs_despues);
+        END IF;
+
+        -- Las agendas de ese dia dejan de estar disponibles
+        UPDATE TBL_AGENDAS_MEDICOS SET ID_ESTADO = vn_ocup
+         WHERE ID_MEDICO = pn_id_medico
+           AND FECHA_HORA_INICIO >= vd_dia AND FECHA_HORA_INICIO < vd_dia + 1
+           AND ID_ESTADO = vn_disp;
+        vn_bloqueadas := SQL%ROWCOUNT;
+
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, pn_id_usuario, 'CANCELACION_MASIVA', 'TBL_AGENDAS_MEDICOS', pn_id_medico,
+                'citas programadas=' || pn_canceladas,
+                'fecha=' || TO_CHAR(vd_dia, 'YYYY-MM-DD') || '; canceladas=' || pn_canceladas
+                || '; agendas bloqueadas=' || vn_bloqueadas
+                || CASE WHEN vs_motivo IS NOT NULL THEN '; motivo=' || vs_motivo END);
+
+        COMMIT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            RAISE;
+    END PRO_CANCELAR_CITAS_MEDICO;
 
 END PKG_GESTION_CITAS;
 /

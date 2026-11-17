@@ -42,6 +42,14 @@ CREATE OR REPLACE PACKAGE PKG_GESTION_MEDICAMENTOS AS
         pn_cantidad        IN  NUMBER DEFAULT NULL
     );
 
+    -- Suma pn_cantidad al stock del medicamento (reposicion). Devuelve el nuevo disponible.
+    PROCEDURE PRO_REPONER_STOCK(
+        pn_id_medicamento IN  NUMBER,
+        pn_cantidad       IN  NUMBER,
+        pn_id_usuario     IN  NUMBER,
+        pn_disponible     OUT NUMBER
+    );
+
 END PKG_GESTION_MEDICAMENTOS;
 /
 
@@ -67,6 +75,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
         vn_no_entregada NUMBER := FN_ID_PARAM('ESTADO_RECETA', 'NO ENTREGADA');
         vn_det_no       NUMBER := FN_ID_PARAM('ESTADO_DETALLE_RECETA', 'NO ENTREGADO');
         vn_medico       NUMBER;
+        vt_atencion     TIMESTAMP;
         vn_existe       NUMBER;
         vn_n            NUMBER;
         vs_item         VARCHAR2(400);
@@ -79,8 +88,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
     BEGIN
         -- Bloquea la historia: dos recetas simultaneas para la misma historia no pueden pasar
         BEGIN
-            SELECT a.ID_MEDICO
-              INTO vn_medico
+            SELECT a.ID_MEDICO, h.FECHA_ATENCION
+              INTO vn_medico, vt_atencion
               FROM TBL_HISTORIA_CLINICA h
               JOIN TBL_CITAS_MEDICAS c   ON c.ID_CITA   = h.ID_CITA
               JOIN TBL_AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
@@ -95,6 +104,11 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
 
         IF pn_id_medico IS NOT NULL AND pn_id_medico <> vn_medico THEN
             RAISE_APPLICATION_ERROR(-20202, 'La historia pertenece a otro medico');
+        END IF;
+
+        -- La receta se hace al registrar la consulta; despues solo hay 24 horas para agregarla
+        IF vt_atencion < LOCALTIMESTAMP - INTERVAL '24' HOUR THEN
+            RAISE_APPLICATION_ERROR(-20204, 'Solo se puede recetar hasta 24 horas despues de la consulta');
         END IF;
 
         SELECT COUNT(*) INTO vn_existe FROM TBL_RECETAS_MEDICAS WHERE ID_HISTORIA = pn_id_historia;
@@ -243,6 +257,47 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_MEDICAMENTOS AS
             ROLLBACK;
             RAISE;
     END PRO_ENTREGAR_MEDICAMENTO;
+
+    ------------------------------------------------------------ REPONER STOCK
+    PROCEDURE PRO_REPONER_STOCK(
+        pn_id_medicamento IN  NUMBER,
+        pn_cantidad       IN  NUMBER,
+        pn_id_usuario     IN  NUMBER,
+        pn_disponible     OUT NUMBER
+    ) IS
+        vn_antes     NUMBER;
+        ex_bloqueado EXCEPTION;
+        PRAGMA EXCEPTION_INIT(ex_bloqueado, -30006);
+    BEGIN
+        IF pn_cantidad IS NULL OR pn_cantidad < 1 OR pn_cantidad <> TRUNC(pn_cantidad) OR pn_cantidad > 100000 THEN
+            RAISE_APPLICATION_ERROR(-20210, 'La cantidad a reponer debe ser un entero entre 1 y 100000');
+        END IF;
+
+        BEGIN
+            SELECT CANTIDAD_DISPONIBLE INTO vn_antes
+              FROM TBL_STOCK_FARMACIA
+             WHERE ID_MEDICAMENTO = pn_id_medicamento
+               FOR UPDATE WAIT 5;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE_APPLICATION_ERROR(-20205, 'El medicamento no tiene stock registrado');
+            WHEN ex_bloqueado THEN
+                RAISE_APPLICATION_ERROR(-20209, 'El stock se esta actualizando, intenta de nuevo');
+        END;
+
+        pn_disponible := vn_antes + pn_cantidad;
+        UPDATE TBL_STOCK_FARMACIA SET CANTIDAD_DISPONIBLE = pn_disponible WHERE ID_MEDICAMENTO = pn_id_medicamento;
+
+        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
+        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, pn_id_usuario, 'REPONER_STOCK', 'TBL_STOCK_FARMACIA', pn_id_medicamento,
+                'stock=' || vn_antes, 'stock=' || pn_disponible || ' (+' || pn_cantidad || ')');
+
+        COMMIT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            RAISE;
+    END PRO_REPONER_STOCK;
 
 END PKG_GESTION_MEDICAMENTOS;
 /
