@@ -12,8 +12,8 @@ Corre los scripts en este orden. Los números de las carpetas lo indican.
 | 2 | `02_tablas/creacion_tablas.sql` | `PROYECTOPLSQL` | Borra y crea las 14 tablas, índices y secuencias. Se puede repetir para empezar de cero. |
 | 3 | `03_datos/datos_companieros.sql` | `PROYECTOPLSQL` | Carga los datos de prueba compartidos (todo el grupo queda con los mismos). Luego `03_datos/estado_no_asistio.sql` si el estado NO_ASISTIO no está. |
 | 4 | `04_secuencias/despues_de_importar.sql` | `PROYECTOPLSQL` | Deja las secuencias en MAX(id)+1 para que el próximo `NEXTVAL` no choque con los datos. |
-| 5 | `05_triggers/` | `PROYECTOPLSQL` | Triggers: `TRG_HISTORIA_CITA_PROGRAMADA` (HU04), `TRG_DETALLE_ESTADO_RECETA`, `TRG_STOCK_MINIMO` (HU06), `TRG_HISTORIA_AUDITORIA` (HU08) y los de `trg_auditoria_tablas.sql` (`TRG_AUD_*`). **Siempre después de cargar los datos.** |
-| 6 | `06_procedimientos/` | `PROYECTOPLSQL` | Paquetes: `PKG_AGENDAS`, `PKG_GESTION_CITAS`, `PKG_HISTORIAS_CLINICAS`, `PKG_GESTION_MEDICAMENTOS`, `PKG_PERFILES`, `PKG_USUARIOS`, `PKG_SEGURIDAD` y `PKG_REPORTES`. |
+| 5 | `05_triggers/` | `PROYECTOPLSQL` | **Requiere `PKG_AUDITORIA` ya compilado (`06_procedimientos/pkg_auditoria.sql`): córrelo antes.** Triggers: `TRG_HISTORIA_CITA_PROGRAMADA` (HU04), `TRG_DETALLE_ESTADO_RECETA`, `TRG_STOCK_MINIMO` (HU06), `TRG_HISTORIA_AUDITORIA` (HU08) y los de `trg_auditoria_tablas.sql` (`TRG_AUD_*`). **Siempre después de cargar los datos.** |
+| 6 | `06_procedimientos/` | `PROYECTOPLSQL` | Paquetes (orden: `PKG_AUDITORIA` primero, luego `PKG_GESTION_CITAS`, y después `PKG_AGENDAS`, que lo usa): `PKG_AUDITORIA`, `PKG_AGENDAS`, `PKG_GESTION_CITAS`, `PKG_HISTORIAS_CLINICAS`, `PKG_GESTION_MEDICAMENTOS`, `PKG_PERFILES`, `PKG_USUARIOS`, `PKG_SEGURIDAD` y `PKG_REPORTES`. |
 | 7 | `07_datos_iniciales/horarios_medicos.sql` | `PROYECTOPLSQL` | Deja a los 10 médicos con horario semanal (sin esto nadie tiene agendas futuras). Después de compilar los paquetes. |
 | 8 | `08_seguridad/rls_historias.sql` | `PROYECTOPLSQL` | HU07: permisos por rol y política `POL_HISTORIA_CLINICA` (`DBMS_RLS`). Después de compilar `PKG_SEGURIDAD`. |
 
@@ -23,7 +23,7 @@ Al terminar los pasos 2 a 4 deberías tener: 100 pacientes, 10 médicos, 3 farma
 (20% canceladas), 148 recetas y 117 usuarios.
 
 ## Si ya tenías la BD cargada
-No hace falta empezar de cero. Corre solo lo nuevo, en este orden: 1b (SYSTEM), los triggers nuevos del paso 5, los paquetes del paso 6 (recompilar todos) y el paso 8. Si cambió `creacion_tablas.sql`, vuelve a correr los pasos 2 a 4.
+No hace falta empezar de cero. Corre solo lo nuevo, en este orden: 1b (SYSTEM), `pkg_auditoria.sql`, `pkg_gestion_citas.sql`, `pkg_agendas.sql`, los demás paquetes, los triggers del paso 5 (recompilarlos todos) y el paso 8. Si cambió `creacion_tablas.sql`, vuelve a correr los pasos 2 a 4.
 
 ## Modelo cita-agenda (1 a N)
 Una agenda (`TBL_AGENDAS_MEDICOS`) es un rango de horas del médico (ej. martes de 7:00 a 12:00) y puede tener varias
@@ -42,7 +42,12 @@ agendas y bloques del horario semanal son de horas completas. HU09 debe leer la 
 - Los permisos de los roles `ROLE_MEDICO` y `ROLE_RECEPCION` quedan creados, pero la aplicación se conecta con un solo usuario; lo que protege de verdad es la política RLS.
 
 ## Auditoría por triggers
+Todos los triggers de auditoría arman los datos y llaman a `PKG_AUDITORIA.PRO_REGISTRAR(accion, tabla, id_registro, antes, despues [, usuario])`, que es el único código que inserta en `TBL_LOG_AUDITORIAS` (sin `COMMIT`, así sirve dentro de un trigger). `PKG_AUDITORIA.FN_USUARIO_ACTUAL` lee el contexto `CTX_CITAS` (0 = sistema).
+
 Las tablas `TBL_HISTORIA_CLINICA`, `TBL_RECETAS_MEDICAS`, `TBL_DETALLE_RECETA`, `TBL_STOCK_FARMACIA` y `TBL_MEDICAMENTOS` tienen trigger de auditoría: cada INSERT, UPDATE o DELETE deja una fila en `TBL_LOG_AUDITORIAS` con valor anterior y nuevo (acción `INSERT`/`UPDATE`/`DELETE`; en historias, `CREAR_HISTORIA`, `MODIFICAR_HISTORIA`, `ELIMINAR_HISTORIA`). El usuario sale del contexto `CTX_CITAS`. Se registra aunque el cambio se haga con SQL directo. Los procedimientos conservan además su fila de negocio (por ejemplo `ENTREGAR_MEDICAMENTO`). Prueba: `tests/auditoria_tablas_prueba.sql`.
+
+## Reprogramación de citas por cambio de horario
+Cuando el médico guarda un horario semanal nuevo (`PRO_GUARDAR_HORARIO_SEMANAL`) y una agenda futura que ya tenía citas PROGRAMADAS deja de estar en ese horario, `PKG_GESTION_CITAS.PRO_REPROGRAMAR_AGENDA` mueve cada cita al **siguiente día libre** del mismo médico: a la misma hora si está libre ese día y, si no, a la primera hora libre. Busca hasta 60 días, sin cruzar citas del médico ni del paciente. Si no hay hueco, cancela la cita explicando el motivo. Cada caso deja `REPROGRAMAR_CITA` o `CANCELAR_CITA` en la bitácora con la explicación en `motivo=...`, que el paciente ve en "Mis citas". El resumen queda en `GUARDAR_HORARIO_SEMANAL` (`citas_reprogramadas`, `citas_canceladas`). Prueba: `tests/reprogramacion_auditoria_prueba.sql`.
 
 ## HU09: cancelación masiva por inasistencia médica
 `PKG_GESTION_CITAS.PRO_CANCELAR_CITAS_MEDICO(medico, fecha, motivo, usuario, canceladas OUT)` cancela con `BULK COLLECT` + `FORALL` todas las citas PROGRAMADAS de un médico en una fecha (hoy o futura). Deja una fila `CANCELAR_CITA` por cita (el paciente ve el motivo en su pantalla) y una fila resumen `CANCELACION_MASIVA`. Las agendas de ese día quedan OCUPADA para que nadie reserve; para reabrirlas hay que volver a guardar el horario del médico. Solo SUPERADMIN.

@@ -3,6 +3,8 @@
 -- (ej. martes 7:00 a 12:00) y dentro de ella se reservan varias citas (ver PKG_GESTION_CITAS).
 -- Inserta y borra filas en TBL_AGENDAS_MEDICOS ligadas al ID_MEDICO. DIA_SEMANA de cada agenda permite repetir
 -- el mismo horario cada semana. Errores: 20301-20399.
+-- Si el nuevo horario deja sin efecto agendas que ya tenian citas, las citas se reprograman
+-- (PKG_GESTION_CITAS.PRO_REPROGRAMAR_AGENDA). Compilar despues de PKG_AUDITORIA y PKG_GESTION_CITAS.
 -- =====================================================================
 CREATE OR REPLACE PACKAGE PKG_AGENDAS AS
 
@@ -19,6 +21,9 @@ CREATE OR REPLACE PACKAGE PKG_AGENDAS AS
     -- ps_bloques: 'DIA~HH:MM~HH:MM|DIA~HH:MM~HH:MM' (DIA = LUNES..DOMINGO; vacio = sin horario).
     -- Borra las agendas futuras del medico que no tengan citas y
     -- crea las de las proximas pn_semanas semanas segun los bloques (una agenda por cada fecha).
+    -- Las agendas futuras CON citas que ya no estan en el nuevo horario no se pierden: sus citas pasan
+    -- al siguiente dia libre del medico, con una explicacion para el paciente (si no hay hueco, se cancelan
+    -- explicando el motivo). El resultado queda en la bitacora (GUARDAR_HORARIO_SEMANAL).
     PROCEDURE PRO_GUARDAR_HORARIO_SEMANAL(
         pn_id_medico  IN  NUMBER,
         ps_bloques    IN  VARCHAR2,
@@ -120,10 +125,19 @@ CREATE OR REPLACE PACKAGE BODY PKG_AGENDAS AS
         vc_desde    t_txt;
         vc_hasta    t_txt;
         vn_disp     NUMBER := FN_ID_PARAM('ESTADO_AGENDA', 'DISPONIBLE');
+        vn_ocup     NUMBER := FN_ID_PARAM('ESTADO_AGENDA', 'OCUPADA');
+        vn_prog     NUMBER := FN_ID_PARAM('ESTADO_CITA', 'PROGRAMADA');
         vn_medico   NUMBER;
         vn_n        NUMBER := CASE WHEN ps_bloques IS NULL THEN 0 ELSE REGEXP_COUNT(ps_bloques, '[^|]+') END;
         vs_item     VARCHAR2(60);
         vn_min      NUMBER;
+        TYPE t_ids IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
+        vc_obsoletas t_ids;
+        vb_vigente   BOOLEAN;
+        vn_reprog    NUMBER := 0;
+        vn_cancel    NUMBER := 0;
+        vn_r         NUMBER;
+        vn_c         NUMBER;
         ex_bloqueado EXCEPTION;
         PRAGMA EXCEPTION_INIT(ex_bloqueado, -30006);
     BEGIN
@@ -183,9 +197,46 @@ CREATE OR REPLACE PACKAGE BODY PKG_AGENDAS AS
             pn_creadas := pn_creadas + FN_CREAR_DIA(pn_id_medico, vc_dias(vn_i), vc_desde(vn_i), vc_hasta(vn_i), TRUNC(SYSDATE) - 1, pn_semanas);
         END LOOP;
 
-        INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-        VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, pn_id_usuario, 'GUARDAR_HORARIO_SEMANAL', 'TBL_AGENDAS_MEDICOS', pn_id_medico,
-                NULL, 'medico=' || pn_id_medico || '; bloques=' || vn_n || '; agendas_creadas=' || pn_creadas);
+        -- Agendas futuras con citas PROGRAMADAS que el nuevo horario ya no incluye (mismo dia y mismas horas)
+        FOR vr_ag IN (SELECT a.ID_AGENDA, a.DIA_SEMANA,
+                             TO_CHAR(a.FECHA_HORA_INICIO, 'HH24:MI') AS DESDE,
+                             TO_CHAR(a.FECHA_HORA_FIN, 'HH24:MI')    AS HASTA
+                        FROM TBL_AGENDAS_MEDICOS a
+                       WHERE a.ID_MEDICO = pn_id_medico
+                         AND a.FECHA_HORA_INICIO > LOCALTIMESTAMP
+                         AND EXISTS (SELECT 1 FROM TBL_CITAS_MEDICAS c
+                                      WHERE c.ID_AGENDA = a.ID_AGENDA AND c.ID_ESTADO = vn_prog)
+                       ORDER BY a.FECHA_HORA_INICIO) LOOP
+            vb_vigente := FALSE;
+            FOR vn_i IN 1 .. vn_n LOOP
+                IF vc_dias(vn_i) = vr_ag.DIA_SEMANA AND vc_desde(vn_i) = vr_ag.DESDE AND vc_hasta(vn_i) = vr_ag.HASTA THEN
+                    vb_vigente := TRUE;
+                END IF;
+            END LOOP;
+            IF NOT vb_vigente THEN
+                vc_obsoletas(vc_obsoletas.COUNT + 1) := vr_ag.ID_AGENDA;
+            END IF;
+        END LOOP;
+
+        IF vc_obsoletas.COUNT > 0 THEN
+            -- Primero se bloquean todas (OCUPADA) para que ninguna reciba citas de otra
+            FORALL vn_i IN 1 .. vc_obsoletas.COUNT
+                UPDATE TBL_AGENDAS_MEDICOS SET ID_ESTADO = vn_ocup WHERE ID_AGENDA = vc_obsoletas(vn_i);
+            FOR vn_i IN 1 .. vc_obsoletas.COUNT LOOP
+                PKG_GESTION_CITAS.PRO_REPROGRAMAR_AGENDA(vc_obsoletas(vn_i), pn_id_usuario, vn_r, vn_c, 0);
+                vn_reprog := vn_reprog + vn_r;
+                vn_cancel := vn_cancel + vn_c;
+            END LOOP;
+            -- Los tramos que quedaron libres al mover las citas se vuelven a ofrecer segun el nuevo horario
+            FOR vn_i IN 1 .. vn_n LOOP
+                pn_creadas := pn_creadas + FN_CREAR_DIA(pn_id_medico, vc_dias(vn_i), vc_desde(vn_i), vc_hasta(vn_i), TRUNC(SYSDATE) - 1, pn_semanas);
+            END LOOP;
+        END IF;
+
+        PKG_AUDITORIA.PRO_REGISTRAR('GUARDAR_HORARIO_SEMANAL', 'TBL_AGENDAS_MEDICOS', pn_id_medico, NULL,
+                'medico=' || pn_id_medico || '; bloques=' || vn_n || '; agendas_creadas=' || pn_creadas
+                || '; citas_reprogramadas=' || vn_reprog || '; citas_canceladas=' || vn_cancel,
+                pn_id_usuario);
 
         COMMIT;
     EXCEPTION

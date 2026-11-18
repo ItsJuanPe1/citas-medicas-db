@@ -1,10 +1,11 @@
 -- =====================================================================
--- PKG_GESTION_CITAS  (HU01 reservar, HU02 cancelar, HU09 cancelacion masiva)
+-- PKG_GESTION_CITAS  (HU01 reservar, HU02 cancelar, HU09 cancelacion masiva, reprogramacion por cambio de horario)
 -- Modelo 1 a N: una agenda es un RANGO de horas del medico (ej. martes 7:00 a 12:00)
 -- y puede tener varias citas; cada cita guarda su propia hora de inicio y fin.
 -- Estado de la agenda: DISPONIBLE mientras queden minutos libres; OCUPADA cuando las citas
 -- (no canceladas) llenan todo el rango. Al cancelar una cita la agenda vuelve a DISPONIBLE.
 -- Errores: 20001-20099.
+-- Usa PKG_AUDITORIA (compilarlo antes).
 -- =====================================================================
 CREATE OR REPLACE PACKAGE PKG_GESTION_CITAS AS
 
@@ -52,6 +53,22 @@ CREATE OR REPLACE PACKAGE PKG_GESTION_CITAS AS
         ps_motivo     IN  VARCHAR2,
         pn_id_usuario IN  NUMBER,
         pn_canceladas OUT NUMBER
+    );
+
+    -- Reprogramacion. El medico cambio su horario y esta agenda ya no existe: cada cita PROGRAMADA
+    -- de la agenda pasa al SIGUIENTE DIA LIBRE del mismo medico (a la misma hora si esta libre ese dia;
+    -- si no, a la primera hora libre). Se busca hasta 60 dias adelante, sin cruzar citas del medico
+    -- ni del paciente. Si no hay hueco, la cita se cancela con un motivo que lo explica.
+    -- En ambos casos queda una fila en la bitacora (REPROGRAMAR_CITA o CANCELAR_CITA) con la
+    -- explicacion al final ('motivo=...'), que el paciente ve en "Mis citas".
+    -- Al terminar la agenda se borra si quedo sin citas; si conserva citas canceladas queda OCUPADA.
+    -- pn_confirmar = 1 hace COMMIT (uso directo); 0 lo deja a quien llama (PKG_AGENDAS).
+    PROCEDURE PRO_REPROGRAMAR_AGENDA(
+        pn_id_agenda     IN  NUMBER,
+        pn_id_usuario    IN  NUMBER,
+        pn_reprogramadas OUT NUMBER,
+        pn_canceladas    OUT NUMBER,
+        pn_confirmar     IN  NUMBER DEFAULT 1
     );
 
 END PKG_GESTION_CITAS;
@@ -335,6 +352,186 @@ CREATE OR REPLACE PACKAGE BODY PKG_GESTION_CITAS AS
             ROLLBACK;
             RAISE;
     END PRO_CANCELAR_CITAS_MEDICO;
+
+    ---------------------------------------------------------------- Reprogramacion
+    -- Primer hueco libre del medico desde el dia siguiente a pt_original. Prefiere la misma hora del dia;
+    -- si ese dia no esta libre a esa hora, toma la primera hora libre del dia. Deja bloqueadas las agendas
+    -- revisadas (FOR UPDATE SKIP LOCKED) para que nadie reserve mientras se mueve la cita.
+    PROCEDURE PRO_BUSCAR_HUECO(
+        pn_medico          IN  NUMBER,
+        pn_paciente        IN  NUMBER,
+        pn_cita            IN  NUMBER,
+        pt_original        IN  TIMESTAMP,
+        pn_minutos         IN  NUMBER,
+        pn_agenda_excluida IN  NUMBER,
+        pn_agenda          OUT NUMBER,
+        pt_hueco           OUT TIMESTAMP
+    ) IS
+        cn_dias_busqueda CONSTANT NUMBER := 60;
+        vn_disp      NUMBER := FN_ID_PARAM('ESTADO_AGENDA', 'DISPONIBLE');
+        vn_canc      NUMBER := FN_ID_PARAM('ESTADO_CITA',   'CANCELADA');
+        vd_primero   DATE := TRUNC(CAST(pt_original AS DATE)) + 1;
+        vd_dia       DATE;
+        vs_hora_pref VARCHAR2(5) := TO_CHAR(pt_original, 'HH24:MI');
+        vn_alt       NUMBER;
+        vt_alt       TIMESTAMP;
+        vt           TIMESTAMP;
+
+        FUNCTION FN_LIBRE(pt_ini TIMESTAMP) RETURN BOOLEAN IS
+            vt_fin TIMESTAMP := pt_ini + NUMTODSINTERVAL(pn_minutos, 'MINUTE');
+            vn_n   NUMBER;
+        BEGIN
+            SELECT COUNT(*) INTO vn_n
+              FROM TBL_CITAS_MEDICAS c
+              JOIN TBL_AGENDAS_MEDICOS a ON a.ID_AGENDA = c.ID_AGENDA
+             WHERE a.ID_MEDICO = pn_medico AND c.ID_ESTADO <> vn_canc
+               AND c.ID_CITA <> pn_cita
+               AND c.FECHA_HORA_INICIO < vt_fin AND c.FECHA_HORA_FIN > pt_ini;
+            IF vn_n > 0 THEN RETURN FALSE; END IF;
+            SELECT COUNT(*) INTO vn_n
+              FROM TBL_CITAS_MEDICAS c
+             WHERE c.ID_PACIENTE = pn_paciente AND c.ID_ESTADO <> vn_canc
+               AND c.ID_CITA <> pn_cita
+               AND c.FECHA_HORA_INICIO < vt_fin AND c.FECHA_HORA_FIN > pt_ini;
+            RETURN vn_n = 0;
+        END FN_LIBRE;
+    BEGIN
+        pn_agenda := NULL;
+        pt_hueco  := NULL;
+        FOR vr_ag IN (SELECT ID_AGENDA, FECHA_HORA_INICIO, FECHA_HORA_FIN
+                        FROM TBL_AGENDAS_MEDICOS
+                       WHERE ID_MEDICO = pn_medico
+                         AND ID_ESTADO = vn_disp
+                         AND ID_AGENDA <> pn_agenda_excluida
+                         AND FECHA_HORA_INICIO >= vd_primero
+                         AND FECHA_HORA_INICIO <  vd_primero + cn_dias_busqueda
+                         AND FECHA_HORA_INICIO >  LOCALTIMESTAMP
+                       ORDER BY FECHA_HORA_INICIO
+                         FOR UPDATE OF ID_ESTADO SKIP LOCKED) LOOP
+            -- cambio de dia: si el dia anterior tuvo algun hueco, ese es el siguiente dia libre
+            IF vd_dia IS NOT NULL AND TRUNC(CAST(vr_ag.FECHA_HORA_INICIO AS DATE)) <> vd_dia AND vn_alt IS NOT NULL THEN
+                EXIT;
+            END IF;
+            vd_dia := TRUNC(CAST(vr_ag.FECHA_HORA_INICIO AS DATE));
+            vt := vr_ag.FECHA_HORA_INICIO;
+            WHILE vt + NUMTODSINTERVAL(pn_minutos, 'MINUTE') <= vr_ag.FECHA_HORA_FIN LOOP
+                IF FN_LIBRE(vt) THEN
+                    IF TO_CHAR(vt, 'HH24:MI') = vs_hora_pref THEN
+                        pn_agenda := vr_ag.ID_AGENDA;
+                        pt_hueco  := vt;
+                        RETURN;
+                    END IF;
+                    IF vn_alt IS NULL THEN
+                        vn_alt := vr_ag.ID_AGENDA;
+                        vt_alt := vt;
+                    END IF;
+                END IF;
+                vt := vt + NUMTODSINTERVAL(pn_minutos, 'MINUTE');
+            END LOOP;
+        END LOOP;
+        pn_agenda := vn_alt;
+        pt_hueco  := vt_alt;
+    END PRO_BUSCAR_HUECO;
+
+    PROCEDURE PRO_REPROGRAMAR_AGENDA(
+        pn_id_agenda     IN  NUMBER,
+        pn_id_usuario    IN  NUMBER,
+        pn_reprogramadas OUT NUMBER,
+        pn_canceladas    OUT NUMBER,
+        pn_confirmar     IN  NUMBER DEFAULT 1
+    ) IS
+        vn_prog      NUMBER := FN_ID_PARAM('ESTADO_CITA',   'PROGRAMADA');
+        vn_canc      NUMBER := FN_ID_PARAM('ESTADO_CITA',   'CANCELADA');
+        vn_ocup      NUMBER := FN_ID_PARAM('ESTADO_AGENDA', 'OCUPADA');
+        vn_medico    NUMBER;
+        vn_nueva     NUMBER;
+        vt_nuevo     TIMESTAMP;
+        vt_ag_ini    TIMESTAMP;
+        vt_ag_fin    TIMESTAMP;
+        vn_minutos   NUMBER;
+        vn_usados    NUMBER;
+        vn_resto     NUMBER;
+        vs_motivo    VARCHAR2(500);
+        cs_fmt       CONSTANT VARCHAR2(20) := 'DD/MM/YYYY HH24:MI';
+        ex_bloqueado EXCEPTION;
+        PRAGMA EXCEPTION_INIT(ex_bloqueado, -30006);
+    BEGIN
+        pn_reprogramadas := 0;
+        pn_canceladas    := 0;
+
+        BEGIN
+            SELECT ID_MEDICO INTO vn_medico FROM TBL_AGENDAS_MEDICOS
+             WHERE ID_AGENDA = pn_id_agenda FOR UPDATE WAIT 5;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE_APPLICATION_ERROR(-20002, 'El horario no existe');
+        END;
+
+        FOR vr_c IN (SELECT ID_CITA, ID_PACIENTE, FECHA_HORA_INICIO, FECHA_HORA_FIN
+                       FROM TBL_CITAS_MEDICAS
+                      WHERE ID_AGENDA = pn_id_agenda AND ID_ESTADO = vn_prog
+                      ORDER BY FECHA_HORA_INICIO
+                        FOR UPDATE OF ID_ESTADO WAIT 5) LOOP
+
+            PRO_BUSCAR_HUECO(vn_medico, vr_c.ID_PACIENTE, vr_c.ID_CITA, vr_c.FECHA_HORA_INICIO,
+                             FN_MINUTOS(vr_c.FECHA_HORA_INICIO, vr_c.FECHA_HORA_FIN), pn_id_agenda,
+                             vn_nueva, vt_nuevo);
+
+            IF vn_nueva IS NOT NULL THEN
+                UPDATE TBL_CITAS_MEDICAS
+                   SET ID_AGENDA = vn_nueva,
+                       FECHA_HORA_INICIO = vt_nuevo,
+                       FECHA_HORA_FIN = vt_nuevo + (vr_c.FECHA_HORA_FIN - vr_c.FECHA_HORA_INICIO)
+                 WHERE ID_CITA = vr_c.ID_CITA;
+
+                -- la agenda que recibe la cita pasa a OCUPADA si ya quedo llena
+                SELECT FECHA_HORA_INICIO, FECHA_HORA_FIN INTO vt_ag_ini, vt_ag_fin
+                  FROM TBL_AGENDAS_MEDICOS WHERE ID_AGENDA = vn_nueva;
+                vn_minutos := FN_MINUTOS(vt_ag_ini, vt_ag_fin);
+                SELECT NVL(SUM(ROUND((CAST(c.FECHA_HORA_FIN AS DATE) - CAST(c.FECHA_HORA_INICIO AS DATE)) * 24 * 60)), 0)
+                  INTO vn_usados
+                  FROM TBL_CITAS_MEDICAS c
+                 WHERE c.ID_AGENDA = vn_nueva AND c.ID_ESTADO <> vn_canc;
+                IF vn_usados >= vn_minutos THEN
+                    UPDATE TBL_AGENDAS_MEDICOS SET ID_ESTADO = vn_ocup WHERE ID_AGENDA = vn_nueva;
+                END IF;
+
+                vs_motivo := 'El medico cambio su horario. Tu cita del ' || TO_CHAR(vr_c.FECHA_HORA_INICIO, cs_fmt)
+                             || ' paso al ' || TO_CHAR(vt_nuevo, cs_fmt) || ', el siguiente dia con horario libre';
+                PKG_AUDITORIA.PRO_REGISTRAR('REPROGRAMAR_CITA', 'TBL_CITAS_MEDICAS', vr_c.ID_CITA,
+                    'id_agenda=' || pn_id_agenda || '; cita=' || TO_CHAR(vr_c.FECHA_HORA_INICIO, 'YYYY-MM-DD HH24:MI'),
+                    'id_agenda=' || vn_nueva || '; cita=' || TO_CHAR(vt_nuevo, 'YYYY-MM-DD HH24:MI') || '; motivo=' || vs_motivo,
+                    pn_id_usuario);
+                pn_reprogramadas := pn_reprogramadas + 1;
+            ELSE
+                UPDATE TBL_CITAS_MEDICAS SET ID_ESTADO = vn_canc WHERE ID_CITA = vr_c.ID_CITA;
+                vs_motivo := 'El medico cambio su horario y no hay otro horario libre en los proximos 60 dias para tu cita del '
+                             || TO_CHAR(vr_c.FECHA_HORA_INICIO, cs_fmt) || '. Reserva una nueva cita';
+                PKG_AUDITORIA.PRO_REGISTRAR('CANCELAR_CITA', 'TBL_CITAS_MEDICAS', vr_c.ID_CITA,
+                    'estado=PROGRAMADA', 'estado=CANCELADA; motivo=' || vs_motivo, pn_id_usuario);
+                pn_canceladas := pn_canceladas + 1;
+            END IF;
+        END LOOP;
+
+        -- La agenda vieja: sin citas se borra; con citas canceladas se deja OCUPADA para que nadie la reserve
+        SELECT COUNT(*) INTO vn_resto FROM TBL_CITAS_MEDICAS WHERE ID_AGENDA = pn_id_agenda;
+        IF vn_resto = 0 THEN
+            DELETE FROM TBL_AGENDAS_MEDICOS WHERE ID_AGENDA = pn_id_agenda;
+        ELSE
+            UPDATE TBL_AGENDAS_MEDICOS SET ID_ESTADO = vn_ocup WHERE ID_AGENDA = pn_id_agenda;
+        END IF;
+
+        IF pn_confirmar = 1 THEN
+            COMMIT;
+        END IF;
+    EXCEPTION
+        WHEN ex_bloqueado THEN
+            IF pn_confirmar = 1 THEN ROLLBACK; END IF;
+            RAISE_APPLICATION_ERROR(-20007, 'Hay citas en uso por otra persona, intenta de nuevo');
+        WHEN OTHERS THEN
+            IF pn_confirmar = 1 THEN ROLLBACK; END IF;
+            RAISE;
+    END PRO_REPROGRAMAR_AGENDA;
 
 END PKG_GESTION_CITAS;
 /

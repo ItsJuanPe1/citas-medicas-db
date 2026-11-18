@@ -1,18 +1,17 @@
 -- =====================================================================
 -- Auditoria de tablas sensibles (medicamentos, stock, recetas y detalle de receta).
--- Cada INSERT, UPDATE o DELETE deja una fila en TBL_LOG_AUDITORIAS con el valor anterior
--- (:OLD) y el nuevo (:NEW). ACCION = INSERT / UPDATE / DELETE; TABLA_AFECTADA dice la tabla.
--- El usuario sale del contexto CTX_CITAS (lo llena el back); sin contexto queda 0 = sistema.
+-- Cada INSERT, UPDATE o DELETE arma el valor anterior (:OLD) y el nuevo (:NEW) y llama a
+-- PKG_AUDITORIA.PRO_REGISTRAR, que es quien escribe en TBL_LOG_AUDITORIAS. ACCION = INSERT / UPDATE / DELETE; TABLA_AFECTADA dice la tabla.
+-- El usuario sale del contexto CTX_CITAS (PKG_AUDITORIA.FN_USUARIO_ACTUAL); sin contexto queda 0 = sistema.
 -- Un UPDATE que no cambia ningun valor no genera fila.
 -- Las historias clinicas se auditan en TRG_HISTORIA_AUDITORIA (HU08).
--- Correr DESPUES de cargar los datos (si no, la carga masiva llena la bitacora).
+-- Correr DESPUES de PKG_AUDITORIA y de cargar los datos (si no, la carga masiva llena la bitacora).
 -- =====================================================================
 
 CREATE OR REPLACE TRIGGER TRG_AUD_MEDICAMENTOS
 AFTER INSERT OR UPDATE OR DELETE ON TBL_MEDICAMENTOS
 FOR EACH ROW
 DECLARE
-    vn_usuario NUMBER := NVL(TO_NUMBER(SYS_CONTEXT('CTX_CITAS', 'ID_USUARIO')), 0);
     vs_accion  VARCHAR2(10);
     vn_id      NUMBER;
     vs_antes   VARCHAR2(4000);
@@ -43,8 +42,7 @@ BEGIN
         RETURN;
     END IF;
 
-    INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-    VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, vn_usuario, vs_accion, 'TBL_MEDICAMENTOS', vn_id, vs_antes, vs_despues);
+    PKG_AUDITORIA.PRO_REGISTRAR(vs_accion, 'TBL_MEDICAMENTOS', vn_id, vs_antes, vs_despues);
 END TRG_AUD_MEDICAMENTOS;
 /
 SHOW ERRORS
@@ -53,7 +51,6 @@ CREATE OR REPLACE TRIGGER TRG_AUD_STOCK_FARMACIA
 AFTER INSERT OR UPDATE OR DELETE ON TBL_STOCK_FARMACIA
 FOR EACH ROW
 DECLARE
-    vn_usuario NUMBER := NVL(TO_NUMBER(SYS_CONTEXT('CTX_CITAS', 'ID_USUARIO')), 0);
     vs_accion  VARCHAR2(10);
     vn_id      NUMBER;
     vs_antes   VARCHAR2(4000);
@@ -82,8 +79,7 @@ BEGIN
         RETURN;
     END IF;
 
-    INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-    VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, vn_usuario, vs_accion, 'TBL_STOCK_FARMACIA', vn_id, vs_antes, vs_despues);
+    PKG_AUDITORIA.PRO_REGISTRAR(vs_accion, 'TBL_STOCK_FARMACIA', vn_id, vs_antes, vs_despues);
 END TRG_AUD_STOCK_FARMACIA;
 /
 SHOW ERRORS
@@ -92,7 +88,6 @@ CREATE OR REPLACE TRIGGER TRG_AUD_RECETAS_MEDICAS
 AFTER INSERT OR UPDATE OR DELETE ON TBL_RECETAS_MEDICAS
 FOR EACH ROW
 DECLARE
-    vn_usuario NUMBER := NVL(TO_NUMBER(SYS_CONTEXT('CTX_CITAS', 'ID_USUARIO')), 0);
     vs_accion  VARCHAR2(10);
     vn_id      NUMBER;
     vs_antes   VARCHAR2(4000);
@@ -121,8 +116,7 @@ BEGIN
         RETURN;
     END IF;
 
-    INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-    VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, vn_usuario, vs_accion, 'TBL_RECETAS_MEDICAS', vn_id, vs_antes, vs_despues);
+    PKG_AUDITORIA.PRO_REGISTRAR(vs_accion, 'TBL_RECETAS_MEDICAS', vn_id, vs_antes, vs_despues);
 END TRG_AUD_RECETAS_MEDICAS;
 /
 SHOW ERRORS
@@ -131,7 +125,6 @@ CREATE OR REPLACE TRIGGER TRG_AUD_DETALLE_RECETA
 AFTER INSERT OR UPDATE OR DELETE ON TBL_DETALLE_RECETA
 FOR EACH ROW
 DECLARE
-    vn_usuario NUMBER := NVL(TO_NUMBER(SYS_CONTEXT('CTX_CITAS', 'ID_USUARIO')), 0);
     vs_accion  VARCHAR2(10);
     vn_id      NUMBER;
     vs_antes   VARCHAR2(4000);
@@ -168,8 +161,7 @@ BEGIN
         RETURN;
     END IF;
 
-    INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-    VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, vn_usuario, vs_accion, 'TBL_DETALLE_RECETA', vn_id, vs_antes, vs_despues);
+    PKG_AUDITORIA.PRO_REGISTRAR(vs_accion, 'TBL_DETALLE_RECETA', vn_id, vs_antes, vs_despues);
 END TRG_AUD_DETALLE_RECETA;
 /
 SHOW ERRORS

@@ -1,7 +1,7 @@
 -- =====================================================================
 -- HU06: alerta de stock minimo.
 -- Cuando un UPDATE BAJA la cantidad disponible y deja el stock por debajo de
--- CANTIDAD_MINIMA, se inserta una alerta en TBL_LOG_AUDITORIAS.
+-- CANTIDAD_MINIMA, se llama a PKG_AUDITORIA.PRO_REGISTRAR, que deja la alerta en TBL_LOG_AUDITORIAS.
 -- Solo alerta al bajar (no al reponer) para no llenar el log con cada cambio.
 -- ID_USUARIO = 0 (sistema), igual que las demas filas automaticas.
 -- No modifica la estructura de ninguna tabla.
@@ -22,11 +22,11 @@ BEGIN
         WHEN NO_DATA_FOUND THEN vs_nombre := 'ID ' || :NEW.ID_MEDICAMENTO;
     END;
 
-    INSERT INTO TBL_LOG_AUDITORIAS (ID_LOG, ID_USUARIO, ACCION, TABLA_AFECTADA, ID_REGISTRO, VALOR_ANTES, VALOR_DESPUES)
-    VALUES (SEQ_TBL_LOG_AUDITORIAS.NEXTVAL, 0, 'ALERTA_STOCK_MINIMO', 'TBL_STOCK_FARMACIA', :NEW.ID_STOCK,
+    PKG_AUDITORIA.PRO_REGISTRAR('ALERTA_STOCK_MINIMO', 'TBL_STOCK_FARMACIA', :NEW.ID_STOCK,
             'Disponible: ' || :OLD.CANTIDAD_DISPONIBLE,
-            SUBSTR('Stock bajo el minimo: ' || vs_nombre || ' | disponible ' || :NEW.CANTIDAD_DISPONIBLE
-                   || ' | minimo ' || :NEW.CANTIDAD_MINIMA, 1, 4000));
+            'Stock bajo el minimo: ' || vs_nombre || ' | disponible ' || :NEW.CANTIDAD_DISPONIBLE
+                   || ' | minimo ' || :NEW.CANTIDAD_MINIMA,
+            0);  -- la alerta es del sistema
 END TRG_STOCK_MINIMO;
 /
 SHOW ERRORS
