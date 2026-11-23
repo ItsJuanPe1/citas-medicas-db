@@ -104,20 +104,23 @@ CREATE OR REPLACE PACKAGE BODY PKG_REPORTES AS
                    COUNT(CASE WHEN e.VALOR = 'CANCELADA'  THEN 1 END) AS CANCELADAS,
                    COUNT(CASE WHEN e.VALOR = 'NO_ASISTIO' THEN 1 END) AS NO_ASISTIO,
                    COUNT(CASE WHEN e.VALOR = 'PROGRAMADA' THEN 1 END) AS PROGRAMADAS,
-                   (SELECT COUNT(*)
-                      FROM TBL_RECETAS_MEDICAS r
-                      JOIN TBL_HISTORIA_CLINICA h ON h.ID_HISTORIA = r.ID_HISTORIA
-                      JOIN TBL_CITAS_MEDICAS c2   ON c2.ID_CITA = h.ID_CITA
-                      JOIN TBL_AGENDAS_MEDICOS a2 ON a2.ID_AGENDA = c2.ID_AGENDA
-                     WHERE a2.ID_MEDICO = m.ID_MEDICO
-                       AND r.FECHA_EMISION >= vd_ini AND r.FECHA_EMISION < vd_fin) AS RECETAS
+                   NVL(rec.TOTAL_RECETAS, 0) AS RECETAS
               FROM TBL_MEDICOS m
               JOIN TBL_PARAMETRICA_TIPOS esp ON esp.ID_PARAMETRO = m.ID_ESPECIALIDAD
               LEFT JOIN TBL_AGENDAS_MEDICOS a ON a.ID_MEDICO = m.ID_MEDICO
               LEFT JOIN TBL_CITAS_MEDICAS c   ON c.ID_AGENDA = a.ID_AGENDA
                                              AND c.FECHA_HORA_INICIO >= vd_ini AND c.FECHA_HORA_INICIO < vd_fin
               LEFT JOIN TBL_PARAMETRICA_TIPOS e ON e.ID_PARAMETRO = c.ID_ESTADO
-             GROUP BY m.ID_MEDICO, m.NOMBRE, m.APELLIDO, esp.VALOR
+              LEFT JOIN (
+                  SELECT a2.ID_MEDICO, COUNT(*) AS TOTAL_RECETAS
+                    FROM TBL_RECETAS_MEDICAS r
+                    JOIN TBL_HISTORIA_CLINICA h ON h.ID_HISTORIA = r.ID_HISTORIA
+                    JOIN TBL_CITAS_MEDICAS c2   ON c2.ID_CITA = h.ID_CITA
+                    JOIN TBL_AGENDAS_MEDICOS a2 ON a2.ID_AGENDA = c2.ID_AGENDA
+                   WHERE r.FECHA_EMISION >= vd_ini AND r.FECHA_EMISION < vd_fin
+                   GROUP BY a2.ID_MEDICO
+              ) rec ON rec.ID_MEDICO = m.ID_MEDICO
+             GROUP BY m.ID_MEDICO, m.NOMBRE, m.APELLIDO, esp.VALOR, rec.TOTAL_RECETAS
              ORDER BY ATENDIDAS DESC, MEDICO;
     END PRO_REPORTE_PERIODO;
 
